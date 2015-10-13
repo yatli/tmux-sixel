@@ -1,3 +1,10 @@
+Note on tmux-sixel
+
+This fork has been created to make it a little easier to keep the sixel support
+patch provided by Hayaki Saito working (see https://github.com/saitoha).
+
+-----------
+
 Welcome to tmux!
 
 tmux is a "terminal multiplexer", it enables a number of terminals (or windows)
