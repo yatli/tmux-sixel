@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2009 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -24,29 +24,33 @@
  * Rotate the panes in a window.
  */
 
-enum cmd_retval	 cmd_rotate_window_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	cmd_rotate_window_exec(struct cmd *,
+			    struct cmdq_item *);
 
 const struct cmd_entry cmd_rotate_window_entry = {
-	"rotate-window", "rotatew",
-	"Dt:U", 0, 0,
-	"[-DU] " CMD_TARGET_WINDOW_USAGE,
-	0,
-	cmd_rotate_window_exec
+	.name = "rotate-window",
+	.alias = "rotatew",
+
+	.args = { "Dt:U", 0, 0 },
+	.usage = "[-DU] " CMD_TARGET_WINDOW_USAGE,
+
+	.target = { 't', CMD_FIND_WINDOW, 0 },
+
+	.flags = 0,
+	.exec = cmd_rotate_window_exec
 };
 
-enum cmd_retval
-cmd_rotate_window_exec(struct cmd *self, struct cmd_q *cmdq)
+static enum cmd_retval
+cmd_rotate_window_exec(struct cmd *self, struct cmdq_item *item)
 {
-	struct args		*args = self->args;
-	struct winlink		*wl;
-	struct window		*w;
+	struct cmd_find_state	*current = &item->shared->current;
+	struct winlink		*wl = item->target.wl;
+	struct window		*w = wl->window;
 	struct window_pane	*wp, *wp2;
 	struct layout_cell	*lc;
 	u_int			 sx, sy, xoff, yoff;
 
-	if ((wl = cmd_find_window(cmdq, args_get(args, 't'), NULL)) == NULL)
-		return (CMD_RETURN_ERROR);
-	w = wl->window;
+	server_unzoom_window(w);
 
 	if (args_has(self->args, 'D')) {
 		wp = TAILQ_LAST(&w->panes, window_panes);
@@ -74,6 +78,7 @@ cmd_rotate_window_exec(struct cmd *self, struct cmd_q *cmdq)
 		if ((wp = TAILQ_PREV(w->active, window_panes, entry)) == NULL)
 			wp = TAILQ_LAST(&w->panes, window_panes);
 		window_set_active_pane(w, wp);
+		cmd_find_from_winlink_pane(current, wl, wp, 0);
 		server_redraw_window(w);
 	} else {
 		wp = TAILQ_FIRST(&w->panes);
@@ -101,6 +106,7 @@ cmd_rotate_window_exec(struct cmd *self, struct cmd_q *cmdq)
 		if ((wp = TAILQ_NEXT(w->active, entry)) == NULL)
 			wp = TAILQ_FIRST(&w->panes);
 		window_set_active_pane(w, wp);
+		cmd_find_from_winlink_pane(current, wl, wp, 0);
 		server_redraw_window(w);
 	}
 

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2010 Dagobert Michelsen
- * Copyright (c) 2010 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2010 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -15,13 +15,15 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/types.h>
+
 #include <stdlib.h>
 #include <string.h>
 
-#include "tmux.h"
+#include "compat.h"
 
 int
-setenv(const char *name, const char *value, unused int overwrite)
+setenv(const char *name, const char *value, __unused int overwrite)
 {
 	char	*newval;
 

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013 Dagobert Michelsen
- * Copyright (c) 2013 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2013 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -15,9 +15,12 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <string.h>
+#include <sys/types.h>
 
-#include "tmux.h"
+#include <string.h>
+#include <termios.h>
+
+#include "compat.h"
 
 void
 cfmakeraw(struct termios *tio)

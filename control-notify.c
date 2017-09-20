@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2012 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2012 Nicholas Marriott <nicholas.marriott@gmail.com>
  * Copyright (c) 2012 George Nachman <tmux@georgester.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -18,6 +18,8 @@
  */
 
 #include <sys/types.h>
+
+#include <stdlib.h>
 
 #include "tmux.h"
 
@@ -58,13 +60,29 @@ control_notify_input(struct client *c, struct window_pane *wp,
 }
 
 void
+control_notify_pane_mode_changed(int pane)
+{
+	struct client	*c;
+
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (!CONTROL_SHOULD_NOTIFY_CLIENT(c))
+			continue;
+
+		control_write(c, "%%pane-mode-changed %%%u", pane);
+	}
+}
+
+void
 control_notify_window_layout_changed(struct window *w)
 {
-	struct client		*c;
-	struct session		*s;
-	struct format_tree	*ft;
-	struct winlink		*wl;
-	const char		*template;
+	struct client	*c;
+	struct session	*s;
+	struct winlink	*wl;
+	const char	*template;
+	char		*cp;
+
+	template = "%layout-change #{window_id} #{window_layout} "
+	    "#{window_visible_layout} #{window_flags}";
 
 	TAILQ_FOREACH(c, &clients, entry) {
 		if (!CONTROL_SHOULD_NOTIFY_CLIENT(c) || c->session == NULL)
@@ -81,20 +99,32 @@ control_notify_window_layout_changed(struct window *w)
 		 */
 		if (w->layout_root == NULL)
 			continue;
-		template = "%layout-change #{window_id} #{window_layout}";
 
-		ft = format_create();
 		wl = winlink_find_by_window(&s->windows, w);
 		if (wl != NULL) {
-			format_defaults(ft, c, NULL, wl, NULL);
-			control_write(c, "%s", format_expand(ft, template));
+			cp = format_single(NULL, template, c, NULL, wl, NULL);
+			control_write(c, "%s", cp);
+			free(cp);
 		}
-		format_free(ft);
 	}
 }
 
 void
-control_notify_window_unlinked(unused struct session *s, struct window *w)
+control_notify_window_pane_changed(struct window *w)
+{
+	struct client	*c;
+
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (!CONTROL_SHOULD_NOTIFY_CLIENT(c))
+			continue;
+
+		control_write(c, "%%window-pane-changed @%u %%%u", w->id,
+		    w->active->id);
+	}
+}
+
+void
+control_notify_window_unlinked(__unused struct session *s, struct window *w)
 {
 	struct client	*c;
 	struct session	*cs;
@@ -112,7 +142,7 @@ control_notify_window_unlinked(unused struct session *s, struct window *w)
 }
 
 void
-control_notify_window_linked(unused struct session *s, struct window *w)
+control_notify_window_linked(__unused struct session *s, struct window *w)
 {
 	struct client	*c;
 	struct session	*cs;
@@ -151,15 +181,27 @@ control_notify_window_renamed(struct window *w)
 }
 
 void
-control_notify_attached_session_changed(struct client *c)
+control_notify_client_session_changed(struct client *cc)
 {
+	struct client	*c;
 	struct session	*s;
 
-	if (!CONTROL_SHOULD_NOTIFY_CLIENT(c) || c->session == NULL)
+	if (cc->session == NULL)
 		return;
-	s = c->session;
+	s = cc->session;
 
-	control_write(c, "%%session-changed $%u %s", s->id, s->name);
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (!CONTROL_SHOULD_NOTIFY_CLIENT(c) || c->session == NULL)
+			continue;
+
+		if (cc == c) {
+			control_write(c, "%%session-changed $%u %s", s->id,
+			    s->name);
+		} else {
+			control_write(c, "%%client-session-changed %s $%u %s",
+			    cc->name, s->id, s->name);
+		}
+	}
 }
 
 void
@@ -176,7 +218,7 @@ control_notify_session_renamed(struct session *s)
 }
 
 void
-control_notify_session_created(unused struct session *s)
+control_notify_session_created(__unused struct session *s)
 {
 	struct client	*c;
 
@@ -189,7 +231,7 @@ control_notify_session_created(unused struct session *s)
 }
 
 void
-control_notify_session_close(unused struct session *s)
+control_notify_session_closed(__unused struct session *s)
 {
 	struct client	*c;
 
@@ -198,5 +240,19 @@ control_notify_session_close(unused struct session *s)
 			continue;
 
 		control_write(c, "%%sessions-changed");
+	}
+}
+
+void
+control_notify_session_window_changed(struct session *s)
+{
+	struct client	*c;
+
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (!CONTROL_SHOULD_NOTIFY_CLIENT(c))
+			continue;
+
+		control_write(c, "%%session-window-changed $%u @%u", s->id,
+		    s->curw->window->id);
 	}
 }

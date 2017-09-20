@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -30,24 +30,28 @@
 
 #define LIST_SESSIONS_TEMPLATE				\
 	"#{session_name}: #{session_windows} windows "	\
-	"(created #{session_created_string}) "		\
+	"(created #{t:session_created}) "		\
 	"[#{session_width}x#{session_height}]"		\
 	"#{?session_grouped, (group ,}"			\
 	"#{session_group}#{?session_grouped,),}"	\
 	"#{?session_attached, (attached),}"
 
-enum cmd_retval	 cmd_list_sessions_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	cmd_list_sessions_exec(struct cmd *,
+			    struct cmdq_item *);
 
 const struct cmd_entry cmd_list_sessions_entry = {
-	"list-sessions", "ls",
-	"F:", 0, 0,
-	"[-F format]",
-	0,
-	cmd_list_sessions_exec
+	.name = "list-sessions",
+	.alias = "ls",
+
+	.args = { "F:", 0, 0 },
+	.usage = "[-F format]",
+
+	.flags = CMD_AFTERHOOK,
+	.exec = cmd_list_sessions_exec
 };
 
-enum cmd_retval
-cmd_list_sessions_exec(struct cmd *self, struct cmd_q *cmdq)
+static enum cmd_retval
+cmd_list_sessions_exec(struct cmd *self, struct cmdq_item *item)
 {
 	struct args		*args = self->args;
 	struct session		*s;
@@ -61,12 +65,12 @@ cmd_list_sessions_exec(struct cmd *self, struct cmd_q *cmdq)
 
 	n = 0;
 	RB_FOREACH(s, sessions, &sessions) {
-		ft = format_create();
+		ft = format_create(item->client, item, FORMAT_NONE, 0);
 		format_add(ft, "line", "%u", n);
 		format_defaults(ft, NULL, s, NULL, NULL);
 
 		line = format_expand(ft, template);
-		cmdq_print(cmdq, "%s", line);
+		cmdq_print(item, "%s", line);
 		free(line);
 
 		format_free(ft);

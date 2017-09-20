@@ -1,37 +1,28 @@
 - command bits and pieces:
 	* allow multiple targets: fnmatch for -t/-c, for example detach all
 	  clients with -t*
-	* add -c for new-session like new-window
 	* ' and " should be parsed the same (eg "\e" vs '\e') in config
 	  and command prompt
 	* last-pane across sessions
+	* resize-pane -p to match split-window -p
+	* flag to wait-for to have a timeout and/or to stop waiting when the
+	  client gets a signal
 
 - make command sequences more usable
 	* don't require space after ;
 	* options for error handling: && and ||?
 
 - options bits and pieces:
-	* set-remain-on-exit is a complete hack
 	* way to set socket path from config file
 
 - format improvements:
-	* option to quote format (#{session_name:quoted})
-	* formats need conditions for >0 (for #P)
+	* option to quote format (#{q:session_name})
 	* some way to pad # stuff with spaces
-	* last window update time and format for it
 	* formats to show if a window is linked into multiple sessions, into
 	  multiple attached sessions, and is the active window in multiple
 	  attached sessions?
-
-- choose mode improvements:
-	* choose-pane command (augment choose-tree to do this?)
-	* choose-mode and copy-mode are very similar, make choose-mode a subset?
-	* flag to choose-* for sort order
-	* choose mode would be better per client than per window?
-	* two choices (first one then second, for swap-pane and join-pane)
-	* choose modes should ditch the key bindings and just have fixed keys, and
-          be more customized to their purpose (d to delete a buffer for choose-buffer,
-          a preview of buffer contents, etc)
+	* comparison operators like < and > (for #{version}?)
+	* %else statement in config file
 
 - improve monitor-*:
 	* straighten out rules for multiple clients
@@ -43,26 +34,21 @@
 	* bind commands to mouse in different areas? 
 	* commands executed when clicking on a pattern (URL)
 
-- hooks!
-
 - warts on current naming:
 	* display-time but message-fg/bg/attr
 	* list-* vs show-*
-	* split-window -> split-pane?
-
-- better UTF-8 support:
-	* window names and titles
-	* message display
-	* prompt input
-	* multibyte key input
-	* searching in copy mode
 
 - copy/paste improvements:
-	* incremental searching
 	* paste w/o trailing whitespace
 	* command to toggle selection not to move it in copy-mode
 	* regex searching
-	* copy-pipe should have -x as well
+	* searching in copy mode should unwrap lines, so if you search for "foobar"
+	  then it should be found even if it is now "foo\nbar" (if the WRAP flag
+	  is set on the line)
+	* capture-pane option to preserve spaces but not join lines
+	* improve word and line selection in copy mode (for example when
+	  dragging it should select by word. compare how xterm works. GitHub
+	  issue 682)
 
 - layout stuff
 	* way to tag a layout as a number/name
@@ -77,19 +63,19 @@
 	* panning over window (window larger than visible)
 	* a mode where one application can cross two panes (ie x|y, width =
 	  COLUMNS/2 but height = ROWS * 2)
-	* general key to space cells out evenly (horiz or vert) within their
-	  parent cell (could replace even-vert/even-horiz layouts)
 	* separate active panes for different clients
-
-- terminfo bits
-	* use a better termcap internally instead of screen, perhaps xterm
-	* use screen-256color when started on 256 colour terminal?
+	* way to choose where the freed space goes when a pane is killed:
+	  option to kill-pane? GitHub issue 918
 
 - code cleanup
 	* instead of separate window and session options, just one master
 	  options list with each option having a type (window or session), then
 	  options on window, on session, and global. for window options we look
-	  window->session->global, and for session we look session->global
+	  window->session->global, and for session we look session->global.
+	  problem: what about windows in multiple sessions? there are contexts
+	  where we do not know which session, or where multiple choices makes
+	  no sense... could at least have one global list for all types of
+	  global options and keep separate window,session lists
 	* the way pane, window, session destroy is handled is too complicated
 	  and the distinction between session.c, window.c and server-fn.c
 	  functions is not clear. could we just have kill_pane(),
@@ -108,10 +94,8 @@
 	  or even guarantee that cmdq->c != NULL and provide a better way to
 	  tell when in the config file - then we use cmdq->c if we need a
 	  client w/o a session else cmd_current_client
-	* optimize pane redraws, 20120318184853.GK10965@yelena.nicm.ath.cx
 
 - miscellaneous
-	* way to keep a job running just read its last line of output for #()
 	* link panes into multiple windows
 	* live update: server started with -U connects to server, requests
 	  sessions and windows, receives file descriptors
@@ -119,8 +103,28 @@
 	  comes from config for new sessions and windows. likewise, panes and
 	  jobs and run-shell and lock command all start with slightly different
 	  environments
-	* multiline status line?
-	* customizable command aliases
+	* multiline status line? separate command prompt and status line?
 	* automatic pane logging
-	* BCE? We are halfway there (output side is done for pane backgrounds),
-	  just need to change how screen/grid handles erase
+	* marks in history, automatically add (move?) one when pane is changed
+	* this doesn't work, need pane reference count probably:
+	  bind -n DoubleClick3Status confirm-before -p "kill-window #I? (y/n)" kill-window
+	* respawn -c flag same as neww etc
+	* marker lines in history (GitHub issue 1042)
+	* tree mode stuff: predefined filters, tag-all key, ...
+
+- hooks
+	* more hooks for various things
+	* finish after hooks for special commands. these do not have a hook at
+          the moment:
+		 attach-session detach-client kill-server respawn-window
+		 swap-window break-pane find-window kill-session rotate-window
+		 switch-client choose-tree if-shell kill-window run-shell
+		 wait-for command-prompt join-pane move-window source-file
+		 confirm-before kill-pane respawn-pane swap-pane
+          at the moment AFTERHOOK uses current only if target is not valid,
+          but target is ALWAYS valid - it should use current if no -t flag?
+          then select-* could use AFTERHOOK
+	* multiple hooks with the same name?
+	* finish hooks for notifys
+	* for session_closed, if no sessions at all, perhaps fake up a
+          temporary one

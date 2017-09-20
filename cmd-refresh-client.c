@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -24,47 +24,52 @@
  * Refresh client.
  */
 
-enum cmd_retval	 cmd_refresh_client_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	cmd_refresh_client_exec(struct cmd *,
+			    struct cmdq_item *);
 
 const struct cmd_entry cmd_refresh_client_entry = {
-	"refresh-client", "refresh",
-	"C:St:", 0, 0,
-	"[-S] [-C size] " CMD_TARGET_CLIENT_USAGE,
-	0,
-	cmd_refresh_client_exec
+	.name = "refresh-client",
+	.alias = "refresh",
+
+	.args = { "C:St:", 0, 0 },
+	.usage = "[-S] [-C size] " CMD_TARGET_CLIENT_USAGE,
+
+	.flags = CMD_AFTERHOOK,
+	.exec = cmd_refresh_client_exec
 };
 
-enum cmd_retval
-cmd_refresh_client_exec(struct cmd *self, struct cmd_q *cmdq)
+static enum cmd_retval
+cmd_refresh_client_exec(struct cmd *self, struct cmdq_item *item)
 {
 	struct args	*args = self->args;
 	struct client	*c;
 	const char	*size;
 	u_int		 w, h;
 
-	if ((c = cmd_find_client(cmdq, args_get(args, 't'), 0)) == NULL)
+	if ((c = cmd_find_client(item, args_get(args, 't'), 0)) == NULL)
 		return (CMD_RETURN_ERROR);
 
 	if (args_has(args, 'C')) {
 		if ((size = args_get(args, 'C')) == NULL) {
-			cmdq_error(cmdq, "missing size");
+			cmdq_error(item, "missing size");
 			return (CMD_RETURN_ERROR);
 		}
 		if (sscanf(size, "%u,%u", &w, &h) != 2) {
-			cmdq_error(cmdq, "bad size argument");
+			cmdq_error(item, "bad size argument");
 			return (CMD_RETURN_ERROR);
 		}
 		if (w < PANE_MINIMUM || w > 5000 ||
 		    h < PANE_MINIMUM || h > 5000) {
-			cmdq_error(cmdq, "size too small or too big");
+			cmdq_error(item, "size too small or too big");
 			return (CMD_RETURN_ERROR);
 		}
 		if (!(c->flags & CLIENT_CONTROL)) {
-			cmdq_error(cmdq, "not a control client");
+			cmdq_error(item, "not a control client");
 			return (CMD_RETURN_ERROR);
 		}
-		if (tty_set_size(&c->tty, w, h))
-			recalculate_sizes();
+		tty_set_size(&c->tty, w, h);
+		c->flags |= CLIENT_SIZECHANGED;
+		recalculate_sizes();
 	} else if (args_has(args, 'S')) {
 		c->flags |= CLIENT_STATUSFORCE;
 		server_status_client(c);

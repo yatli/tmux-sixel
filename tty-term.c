@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2008 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -18,9 +18,9 @@
 
 #include <sys/types.h>
 
-#ifdef HAVE_CURSES_H
+#if defined(HAVE_CURSES_H)
 #include <curses.h>
-#else
+#elif defined(HAVE_NCURSES_H)
 #include <ncurses.h>
 #endif
 #include <fnmatch.h>
@@ -30,8 +30,8 @@
 
 #include "tmux.h"
 
-void	 tty_term_override(struct tty_term *, const char *);
-char	*tty_term_strip(const char *);
+static void	 tty_term_override(struct tty_term *, const char *);
+static char	*tty_term_strip(const char *);
 
 struct tty_terms tty_terms = LIST_HEAD_INITIALIZER(tty_terms);
 
@@ -56,7 +56,7 @@ struct tty_term_code_entry {
 	const char	       *name;
 };
 
-const struct tty_term_code_entry tty_term_codes[] = {
+static const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_ACSC] = { TTYCODE_STRING, "acsc" },
 	[TTYC_AX] = { TTYCODE_FLAG, "AX" },
 	[TTYC_BCE] = { TTYCODE_FLAG, "bce" },
@@ -68,39 +68,38 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_CNORM] = { TTYCODE_STRING, "cnorm" },
 	[TTYC_COLORS] = { TTYCODE_NUMBER, "colors" },
 	[TTYC_CR] = { TTYCODE_STRING, "Cr" },
-	[TTYC_CS] = { TTYCODE_STRING, "Cs" },
 	[TTYC_CSR] = { TTYCODE_STRING, "csr" },
-	[TTYC_CUB] = { TTYCODE_STRING, "cub" },
+	[TTYC_CS] = { TTYCODE_STRING, "Cs" },
 	[TTYC_CUB1] = { TTYCODE_STRING, "cub1" },
-	[TTYC_CUD] = { TTYCODE_STRING, "cud" },
+	[TTYC_CUB] = { TTYCODE_STRING, "cub" },
 	[TTYC_CUD1] = { TTYCODE_STRING, "cud1" },
-	[TTYC_CUF] = { TTYCODE_STRING, "cuf" },
+	[TTYC_CUD] = { TTYCODE_STRING, "cud" },
 	[TTYC_CUF1] = { TTYCODE_STRING, "cuf1" },
+	[TTYC_CUF] = { TTYCODE_STRING, "cuf" },
 	[TTYC_CUP] = { TTYCODE_STRING, "cup" },
-	[TTYC_CUU] = { TTYCODE_STRING, "cuu" },
 	[TTYC_CUU1] = { TTYCODE_STRING, "cuu1" },
+	[TTYC_CUU] = { TTYCODE_STRING, "cuu" },
 	[TTYC_CVVIS] = { TTYCODE_STRING, "cvvis" },
-	[TTYC_DCH] = { TTYCODE_STRING, "dch" },
 	[TTYC_DCH1] = { TTYCODE_STRING, "dch1" },
+	[TTYC_DCH] = { TTYCODE_STRING, "dch" },
 	[TTYC_DIM] = { TTYCODE_STRING, "dim" },
-	[TTYC_DL] = { TTYCODE_STRING, "dl" },
 	[TTYC_DL1] = { TTYCODE_STRING, "dl1" },
+	[TTYC_DL] = { TTYCODE_STRING, "dl" },
 	[TTYC_E3] = { TTYCODE_STRING, "E3" },
 	[TTYC_ECH] = { TTYCODE_STRING, "ech" },
-	[TTYC_EL] = { TTYCODE_STRING, "el" },
+	[TTYC_ED] = { TTYCODE_STRING, "ed" },
 	[TTYC_EL1] = { TTYCODE_STRING, "el1" },
+	[TTYC_EL] = { TTYCODE_STRING, "el" },
 	[TTYC_ENACS] = { TTYCODE_STRING, "enacs" },
 	[TTYC_FSL] = { TTYCODE_STRING, "fsl" },
 	[TTYC_HOME] = { TTYCODE_STRING, "home" },
 	[TTYC_HPA] = { TTYCODE_STRING, "hpa" },
-	[TTYC_ICH] = { TTYCODE_STRING, "ich" },
 	[TTYC_ICH1] = { TTYCODE_STRING, "ich1" },
-	[TTYC_IL] = { TTYCODE_STRING, "il" },
+	[TTYC_ICH] = { TTYCODE_STRING, "ich" },
 	[TTYC_IL1] = { TTYCODE_STRING, "il1" },
+	[TTYC_IL] = { TTYCODE_STRING, "il" },
+	[TTYC_INDN] = { TTYCODE_STRING, "indn" },
 	[TTYC_INVIS] = { TTYCODE_STRING, "invis" },
-	[TTYC_IS1] = { TTYCODE_STRING, "is1" },
-	[TTYC_IS2] = { TTYCODE_STRING, "is2" },
-	[TTYC_IS3] = { TTYCODE_STRING, "is3" },
 	[TTYC_KCBT] = { TTYCODE_STRING, "kcbt" },
 	[TTYC_KCUB1] = { TTYCODE_STRING, "kcub1" },
 	[TTYC_KCUD1] = { TTYCODE_STRING, "kcud1" },
@@ -113,20 +112,19 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_KDC6] = { TTYCODE_STRING, "kDC6" },
 	[TTYC_KDC7] = { TTYCODE_STRING, "kDC7" },
 	[TTYC_KDCH1] = { TTYCODE_STRING, "kdch1" },
-	[TTYC_KDN2] = { TTYCODE_STRING, "kDN" },
+	[TTYC_KDN2] = { TTYCODE_STRING, "kDN" }, /* not kDN2 */
 	[TTYC_KDN3] = { TTYCODE_STRING, "kDN3" },
 	[TTYC_KDN4] = { TTYCODE_STRING, "kDN4" },
 	[TTYC_KDN5] = { TTYCODE_STRING, "kDN5" },
 	[TTYC_KDN6] = { TTYCODE_STRING, "kDN6" },
 	[TTYC_KDN7] = { TTYCODE_STRING, "kDN7" },
-	[TTYC_KEND] = { TTYCODE_STRING, "kend" },
 	[TTYC_KEND2] = { TTYCODE_STRING, "kEND" },
 	[TTYC_KEND3] = { TTYCODE_STRING, "kEND3" },
 	[TTYC_KEND4] = { TTYCODE_STRING, "kEND4" },
 	[TTYC_KEND5] = { TTYCODE_STRING, "kEND5" },
 	[TTYC_KEND6] = { TTYCODE_STRING, "kEND6" },
 	[TTYC_KEND7] = { TTYCODE_STRING, "kEND7" },
-	[TTYC_KF1] = { TTYCODE_STRING, "kf1" },
+	[TTYC_KEND] = { TTYCODE_STRING, "kend" },
 	[TTYC_KF10] = { TTYCODE_STRING, "kf10" },
 	[TTYC_KF11] = { TTYCODE_STRING, "kf11" },
 	[TTYC_KF12] = { TTYCODE_STRING, "kf12" },
@@ -137,7 +135,7 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_KF17] = { TTYCODE_STRING, "kf17" },
 	[TTYC_KF18] = { TTYCODE_STRING, "kf18" },
 	[TTYC_KF19] = { TTYCODE_STRING, "kf19" },
-	[TTYC_KF2] = { TTYCODE_STRING, "kf2" },
+	[TTYC_KF1] = { TTYCODE_STRING, "kf1" },
 	[TTYC_KF20] = { TTYCODE_STRING, "kf20" },
 	[TTYC_KF21] = { TTYCODE_STRING, "kf21" },
 	[TTYC_KF22] = { TTYCODE_STRING, "kf22" },
@@ -148,7 +146,7 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_KF27] = { TTYCODE_STRING, "kf27" },
 	[TTYC_KF28] = { TTYCODE_STRING, "kf28" },
 	[TTYC_KF29] = { TTYCODE_STRING, "kf29" },
-	[TTYC_KF3] = { TTYCODE_STRING, "kf3" },
+	[TTYC_KF2] = { TTYCODE_STRING, "kf2" },
 	[TTYC_KF30] = { TTYCODE_STRING, "kf30" },
 	[TTYC_KF31] = { TTYCODE_STRING, "kf31" },
 	[TTYC_KF32] = { TTYCODE_STRING, "kf32" },
@@ -159,7 +157,7 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_KF37] = { TTYCODE_STRING, "kf37" },
 	[TTYC_KF38] = { TTYCODE_STRING, "kf38" },
 	[TTYC_KF39] = { TTYCODE_STRING, "kf39" },
-	[TTYC_KF4] = { TTYCODE_STRING, "kf4" },
+	[TTYC_KF3] = { TTYCODE_STRING, "kf3" },
 	[TTYC_KF40] = { TTYCODE_STRING, "kf40" },
 	[TTYC_KF41] = { TTYCODE_STRING, "kf41" },
 	[TTYC_KF42] = { TTYCODE_STRING, "kf42" },
@@ -170,7 +168,7 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_KF47] = { TTYCODE_STRING, "kf47" },
 	[TTYC_KF48] = { TTYCODE_STRING, "kf48" },
 	[TTYC_KF49] = { TTYCODE_STRING, "kf49" },
-	[TTYC_KF5] = { TTYCODE_STRING, "kf5" },
+	[TTYC_KF4] = { TTYCODE_STRING, "kf4" },
 	[TTYC_KF50] = { TTYCODE_STRING, "kf50" },
 	[TTYC_KF51] = { TTYCODE_STRING, "kf51" },
 	[TTYC_KF52] = { TTYCODE_STRING, "kf52" },
@@ -181,11 +179,12 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_KF57] = { TTYCODE_STRING, "kf57" },
 	[TTYC_KF58] = { TTYCODE_STRING, "kf58" },
 	[TTYC_KF59] = { TTYCODE_STRING, "kf59" },
-	[TTYC_KF6] = { TTYCODE_STRING, "kf6" },
+	[TTYC_KF5] = { TTYCODE_STRING, "kf5" },
 	[TTYC_KF60] = { TTYCODE_STRING, "kf60" },
 	[TTYC_KF61] = { TTYCODE_STRING, "kf61" },
 	[TTYC_KF62] = { TTYCODE_STRING, "kf62" },
 	[TTYC_KF63] = { TTYCODE_STRING, "kf63" },
+	[TTYC_KF6] = { TTYCODE_STRING, "kf6" },
 	[TTYC_KF7] = { TTYCODE_STRING, "kf7" },
 	[TTYC_KF8] = { TTYCODE_STRING, "kf8" },
 	[TTYC_KF9] = { TTYCODE_STRING, "kf9" },
@@ -203,6 +202,7 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_KIC6] = { TTYCODE_STRING, "kIC6" },
 	[TTYC_KIC7] = { TTYCODE_STRING, "kIC7" },
 	[TTYC_KICH1] = { TTYCODE_STRING, "kich1" },
+	[TTYC_KIND] = { TTYCODE_STRING, "kind" },
 	[TTYC_KLFT2] = { TTYCODE_STRING, "kLFT" },
 	[TTYC_KLFT3] = { TTYCODE_STRING, "kLFT3" },
 	[TTYC_KLFT4] = { TTYCODE_STRING, "kLFT4" },
@@ -230,7 +230,8 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_KRIT5] = { TTYCODE_STRING, "kRIT5" },
 	[TTYC_KRIT6] = { TTYCODE_STRING, "kRIT6" },
 	[TTYC_KRIT7] = { TTYCODE_STRING, "kRIT7" },
-	[TTYC_KUP2] = { TTYCODE_STRING, "kUP" },
+	[TTYC_KRI] = { TTYCODE_STRING, "kri" },
+	[TTYC_KUP2] = { TTYCODE_STRING, "kUP" }, /* not kUP2 */
 	[TTYC_KUP3] = { TTYCODE_STRING, "kUP3" },
 	[TTYC_KUP4] = { TTYCODE_STRING, "kUP4" },
 	[TTYC_KUP5] = { TTYCODE_STRING, "kUP5" },
@@ -244,9 +245,11 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_RMACS] = { TTYCODE_STRING, "rmacs" },
 	[TTYC_RMCUP] = { TTYCODE_STRING, "rmcup" },
 	[TTYC_RMKX] = { TTYCODE_STRING, "rmkx" },
-	[TTYC_SE] = { TTYCODE_STRING, "Se" },
 	[TTYC_SETAB] = { TTYCODE_STRING, "setab" },
 	[TTYC_SETAF] = { TTYCODE_STRING, "setaf" },
+	[TTYC_SETRGBB] = { TTYCODE_STRING, "setrgbb" },
+	[TTYC_SETRGBF] = { TTYCODE_STRING, "setrgbf" },
+	[TTYC_SE] = { TTYCODE_STRING, "Se" },
 	[TTYC_SGR0] = { TTYCODE_STRING, "sgr0" },
 	[TTYC_SITM] = { TTYCODE_STRING, "sitm" },
 	[TTYC_SMACS] = { TTYCODE_STRING, "smacs" },
@@ -255,8 +258,11 @@ const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_SMKX] = { TTYCODE_STRING, "smkx" },
 	[TTYC_SMSO] = { TTYCODE_STRING, "smso" },
 	[TTYC_SMUL] = { TTYCODE_STRING, "smul" },
+	[TTYC_SMXX] =  { TTYCODE_STRING, "smxx" },
 	[TTYC_SS] = { TTYCODE_STRING, "Ss" },
+	[TTYC_TC] = { TTYCODE_FLAG, "Tc" },
 	[TTYC_TSL] = { TTYCODE_STRING, "tsl" },
+	[TTYC_U8] = { TTYCODE_NUMBER, "U8" },
 	[TTYC_VPA] = { TTYCODE_STRING, "vpa" },
 	[TTYC_XENL] = { TTYCODE_FLAG, "xenl" },
 	[TTYC_XT] = { TTYCODE_FLAG, "XT" },
@@ -268,7 +274,7 @@ tty_term_ncodes(void)
 	return (nitems(tty_term_codes));
 }
 
-char *
+static char *
 tty_term_strip(const char *s)
 {
 	const char     *ptr;
@@ -297,87 +303,83 @@ tty_term_strip(const char *s)
 	return (xstrdup(buf));
 }
 
-void
-tty_term_override(struct tty_term *term, const char *overrides)
+static void
+tty_term_override(struct tty_term *term, const char *override)
 {
 	const struct tty_term_code_entry	*ent;
 	struct tty_code				*code;
-	char					*termnext, *termstr;
-	char					*entnext, *entstr;
-	char					*s, *ptr, *val;
+	char					*next, *s, *copy, *cp, *value;
 	const char				*errstr;
 	u_int					 i;
-	int					 n, removeflag;
+	int					 n, remove;
 
-	s = xstrdup(overrides);
+	copy = next = xstrdup(override);
 
-	termnext = s;
-	while ((termstr = strsep(&termnext, ",")) != NULL) {
-		entnext = termstr;
-
-		entstr = strsep(&entnext, ":");
-		if (entstr == NULL || entnext == NULL)
-			continue;
-		if (fnmatch(entstr, term->name, 0) != 0)
-			continue;
-		while ((entstr = strsep(&entnext, ":")) != NULL) {
-			if (*entstr == '\0')
-				continue;
-
-			val = NULL;
-			removeflag = 0;
-			if ((ptr = strchr(entstr, '=')) != NULL) {
-				*ptr++ = '\0';
-				val = xstrdup(ptr);
-				if (strunvis(val, ptr) == -1) {
-					free(val);
-					val = xstrdup(ptr);
-				}
-			} else if (entstr[strlen(entstr) - 1] == '@') {
-				entstr[strlen(entstr) - 1] = '\0';
-				removeflag = 1;
-			} else
-				val = xstrdup("");
-
-			log_debug("%s override: %s %s",
-			    term->name, entstr, removeflag ? "@" : val);
-			for (i = 0; i < tty_term_ncodes(); i++) {
-				ent = &tty_term_codes[i];
-				if (strcmp(entstr, ent->name) != 0)
-					continue;
-				code = &term->codes[i];
-
-				if (removeflag) {
-					code->type = TTYCODE_NONE;
-					continue;
-				}
-				switch (ent->type) {
-				case TTYCODE_NONE:
-					break;
-				case TTYCODE_STRING:
-					if (code->type == TTYCODE_STRING)
-						free(code->value.string);
-					code->value.string = xstrdup(val);
-					code->type = ent->type;
-					break;
-				case TTYCODE_NUMBER:
-					n = strtonum(val, 0, INT_MAX, &errstr);
-					if (errstr != NULL)
-						break;
-					code->value.number = n;
-					code->type = ent->type;
-					break;
-				case TTYCODE_FLAG:
-					code->value.flag = 1;
-					code->type = ent->type;
-					break;
-				}
-			}
-
-			free(val);
-		}
+	s = strsep(&next, ":");
+	if (s == NULL || next == NULL || fnmatch(s, term->name, 0) != 0) {
+		free(copy);
+		return;
 	}
 
+	while ((s = strsep(&next, ":")) != NULL) {
+		if (*s == '\0')
+			continue;
+		value = NULL;
+
+		remove = 0;
+		if ((cp = strchr(s, '=')) != NULL) {
+			*cp++ = '\0';
+			value = xstrdup(cp);
+			if (strunvis(value, cp) == -1) {
+				free(value);
+				value = xstrdup(cp);
+			}
+		} else if (s[strlen(s) - 1] == '@') {
+			s[strlen(s) - 1] = '\0';
+			remove = 1;
+		} else
+			value = xstrdup("");
+
+		if (remove)
+			log_debug("%s override: %s@", term->name, s);
+		else
+			log_debug("%s override: %s=%s", term->name, s, value);
+
+		for (i = 0; i < tty_term_ncodes(); i++) {
+			ent = &tty_term_codes[i];
+			if (strcmp(s, ent->name) != 0)
+				continue;
+			code = &term->codes[i];
+
+			if (remove) {
+				code->type = TTYCODE_NONE;
+				continue;
+			}
+			switch (ent->type) {
+			case TTYCODE_NONE:
+				break;
+			case TTYCODE_STRING:
+				if (code->type == TTYCODE_STRING)
+					free(code->value.string);
+				code->value.string = xstrdup(value);
+				code->type = ent->type;
+				break;
+			case TTYCODE_NUMBER:
+				n = strtonum(value, 0, INT_MAX, &errstr);
+				if (errstr != NULL)
+					break;
+				code->value.number = n;
+				code->type = ent->type;
+				break;
+			case TTYCODE_FLAG:
+				code->value.flag = 1;
+				code->type = ent->type;
+				break;
+			}
+		}
+
+		free(value);
+	}
 	free(s);
 }
 
@@ -387,10 +389,10 @@ tty_term_find(char *name, int fd, char **cause)
 	struct tty_term				*term;
 	const struct tty_term_code_entry	*ent;
 	struct tty_code				*code;
-	u_int					 i;
+	struct options_entry			*o;
+	u_int					 size, i;
 	int		 			 n, error;
-	char					*s;
-	const char				*acs;
+	const char				*s, *acs;
 
 	LIST_FOREACH(term, &tty_terms, entry) {
 		if (strcmp(term->name, name) == 0) {
@@ -398,25 +400,25 @@ tty_term_find(char *name, int fd, char **cause)
 			return (term);
 		}
 	}
-
 	log_debug("new term: %s", name);
+
 	term = xmalloc(sizeof *term);
 	term->name = xstrdup(name);
 	term->references = 1;
 	term->flags = 0;
-	term->codes = xcalloc (tty_term_ncodes(), sizeof *term->codes);
+	term->codes = xcalloc(tty_term_ncodes(), sizeof *term->codes);
 	LIST_INSERT_HEAD(&tty_terms, term, entry);
 
 	/* Set up curses terminal. */
 	if (setupterm(name, fd, &error) != OK) {
 		switch (error) {
 		case 1:
-			xasprintf(
-			    cause, "can't use hardcopy terminal: %s", name);
+			xasprintf(cause, "can't use hardcopy terminal: %s",
+			    name);
 			break;
 		case 0:
-			xasprintf(
-			    cause, "missing or unsuitable terminal: %s", name);
+			xasprintf(cause, "missing or unsuitable terminal: %s",
+			    name);
 			break;
 		case -1:
 			xasprintf(cause, "can't find terminfo database");
@@ -462,8 +464,14 @@ tty_term_find(char *name, int fd, char **cause)
 	}
 
 	/* Apply terminal overrides. */
-	s = options_get_string(&global_options, "terminal-overrides");
-	tty_term_override(term, s);
+	o = options_get_only(global_options, "terminal-overrides");
+	if (options_array_size(o, &size) != -1) {
+		for (i = 0; i < size; i++) {
+			s = options_array_get(o, i);
+			if (s != NULL)
+				tty_term_override(term, s);
+		}
+	}
 
 	/* Delete curses data. */
 #if !defined(NCURSES_VERSION_MAJOR) || NCURSES_VERSION_MAJOR > 5 || \
@@ -525,6 +533,22 @@ tty_term_find(char *name, int fd, char **cause)
 		code->type = TTYCODE_STRING;
 	}
 
+	/* On terminals with RGB colour (TC), fill in setrgbf and setrgbb. */
+	if (tty_term_flag(term, TTYC_TC) &&
+	    !tty_term_has(term, TTYC_SETRGBF) &&
+	    !tty_term_has(term, TTYC_SETRGBB)) {
+		code = &term->codes[TTYC_SETRGBF];
+		code->value.string = xstrdup("\033[38;2;%p1%d;%p2%d;%p3%dm");
+		code->type = TTYCODE_STRING;
+		code = &term->codes[TTYC_SETRGBB];
+		code->value.string = xstrdup("\033[48;2;%p1%d;%p2%d;%p3%dm");
+		code->type = TTYCODE_STRING;
+	}
+
+	/* Log it. */
+	for (i = 0; i < tty_term_ncodes(); i++)
+		log_debug("%s%s", name, tty_term_describe(term, i));
+
 	return (term);
 
 error:
@@ -564,7 +588,7 @@ tty_term_string(struct tty_term *term, enum tty_code_code code)
 	if (!tty_term_has(term, code))
 		return ("");
 	if (term->codes[code].type != TTYCODE_STRING)
-		log_fatalx("not a string: %d", code);
+		fatalx("not a string: %d", code);
 	return (term->codes[code].value.string);
 }
 
@@ -578,6 +602,12 @@ const char *
 tty_term_string2(struct tty_term *term, enum tty_code_code code, int a, int b)
 {
 	return (tparm((char *) tty_term_string(term, code), a, b, 0, 0, 0, 0, 0, 0, 0));
+}
+
+const char *
+tty_term_string3(struct tty_term *term, enum tty_code_code code, int a, int b, int c)
+{
+	return (tparm((char *) tty_term_string(term, code), a, b, c, 0, 0, 0, 0, 0, 0));
 }
 
 const char *
@@ -599,7 +629,7 @@ tty_term_number(struct tty_term *term, enum tty_code_code code)
 	if (!tty_term_has(term, code))
 		return (0);
 	if (term->codes[code].type != TTYCODE_NUMBER)
-		log_fatalx("not a number: %d", code);
+		fatalx("not a number: %d", code);
 	return (term->codes[code].value.number);
 }
 
@@ -609,7 +639,7 @@ tty_term_flag(struct tty_term *term, enum tty_code_code code)
 	if (!tty_term_has(term, code))
 		return (0);
 	if (term->codes[code].type != TTYCODE_FLAG)
-		log_fatalx("not a flag: %d", code);
+		fatalx("not a flag: %d", code);
 	return (term->codes[code].value.flag);
 }
 

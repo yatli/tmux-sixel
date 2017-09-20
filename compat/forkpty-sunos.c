@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2008 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -21,9 +21,13 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <stropts.h>
+#include <termios.h>
 #include <unistd.h>
 
-#include "tmux.h"
+#include "compat.h"
+
+void fatal(const char *, ...);
+void fatalx(const char *, ...);
 
 pid_t
 forkpty(int *master, char *name, struct termios *tio, struct winsize *ws)

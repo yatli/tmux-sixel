@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2009 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,10 +20,10 @@
 #include <sys/socket.h>
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <signal.h>
 
 #include "tmux.h"
 
@@ -32,45 +32,55 @@
  * output.
  */
 
-void	job_callback(struct bufferevent *, short, void *);
-void	job_write_callback(struct bufferevent *, void *);
+static void	job_read_callback(struct bufferevent *, void *);
+static void	job_write_callback(struct bufferevent *, void *);
+static void	job_error_callback(struct bufferevent *, short, void *);
 
 /* All jobs list. */
 struct joblist	all_jobs = LIST_HEAD_INITIALIZER(all_jobs);
 
 /* Start a job running, if it isn't already. */
 struct job *
-job_run(const char *cmd, struct session *s, int cwd,
-    void (*callbackfn)(struct job *), void (*freefn)(void *), void *data)
+job_run(const char *cmd, struct session *s, const char *cwd,
+    job_update_cb updatecb, job_complete_cb completecb, job_free_cb freecb,
+    void *data)
 {
 	struct job	*job;
-	struct environ	 env;
+	struct environ	*env;
 	pid_t		 pid;
 	int		 nullfd, out[2];
+	const char	*home;
+	sigset_t	 set, oldset;
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, out) != 0)
 		return (NULL);
 
-	environ_init(&env);
-	environ_copy(&global_environ, &env);
-	if (s != NULL)
-		environ_copy(&s->environ, &env);
-	server_fill_environ(s, &env);
+	/*
+	 * Do not set TERM during .tmux.conf, it is nice to be able to use
+	 * if-shell to decide on default-terminal based on outside TERM.
+	 */
+	env = environ_for_session(s, !cfg_finished);
 
+	sigfillset(&set);
+	sigprocmask(SIG_BLOCK, &set, &oldset);
 	switch (pid = fork()) {
 	case -1:
-		environ_free(&env);
+		sigprocmask(SIG_SETMASK, &oldset, NULL);
+		environ_free(env);
 		close(out[0]);
 		close(out[1]);
 		return (NULL);
-	case 0:		/* child */
-		clear_signals(1);
+	case 0:
+		proc_clear_signals(server_proc, 1);
+		sigprocmask(SIG_SETMASK, &oldset, NULL);
 
-		if (cwd != -1 && fchdir(cwd) != 0)
-			chdir("/");
+		if (cwd == NULL || chdir(cwd) != 0) {
+			if ((home = find_home()) == NULL || chdir(home) != 0)
+				chdir("/");
+		}
 
-		environ_push(&env);
-		environ_free(&env);
+		environ_push(env);
+		environ_free(env);
 
 		if (dup2(out[1], STDIN_FILENO) == -1)
 			fatal("dup2 failed");
@@ -94,8 +104,8 @@ job_run(const char *cmd, struct session *s, int cwd,
 		fatal("execl failed");
 	}
 
-	/* parent */
-	environ_free(&env);
+	sigprocmask(SIG_SETMASK, &oldset, NULL);
+	environ_free(env);
 	close(out[1]);
 
 	job = xmalloc(sizeof *job);
@@ -105,17 +115,18 @@ job_run(const char *cmd, struct session *s, int cwd,
 	job->pid = pid;
 	job->status = 0;
 
-	LIST_INSERT_HEAD(&all_jobs, job, lentry);
+	LIST_INSERT_HEAD(&all_jobs, job, entry);
 
-	job->callbackfn = callbackfn;
-	job->freefn = freefn;
+	job->updatecb = updatecb;
+	job->completecb = completecb;
+	job->freecb = freecb;
 	job->data = data;
 
 	job->fd = out[0];
 	setblocking(job->fd, 0);
 
-	job->event = bufferevent_new(job->fd, NULL, job_write_callback,
-	    job_callback, job);
+	job->event = bufferevent_new(job->fd, job_read_callback,
+	    job_write_callback, job_error_callback, job);
 	bufferevent_enable(job->event, EV_READ|EV_WRITE);
 
 	log_debug("run job %p: %s, pid %ld", job, job->cmd, (long) job->pid);
@@ -128,11 +139,11 @@ job_free(struct job *job)
 {
 	log_debug("free job %p: %s", job, job->cmd);
 
-	LIST_REMOVE(job, lentry);
+	LIST_REMOVE(job, entry);
 	free(job->cmd);
 
-	if (job->freefn != NULL && job->data != NULL)
-		job->freefn(job->data);
+	if (job->freecb != NULL && job->data != NULL)
+		job->freecb(job->data);
 
 	if (job->pid != -1)
 		kill(job->pid, SIGTERM);
@@ -144,9 +155,23 @@ job_free(struct job *job)
 	free(job);
 }
 
-/* Called when output buffer falls below low watermark (default is 0). */
-void
-job_write_callback(unused struct bufferevent *bufev, void *data)
+/* Job buffer read callback. */
+static void
+job_read_callback(__unused struct bufferevent *bufev, void *data)
+{
+	struct job	*job = data;
+
+	if (job->updatecb != NULL)
+		job->updatecb(job);
+}
+
+/*
+ * Job buffer write callback. Fired when the buffer falls below watermark
+ * (default is empty). If all the data has been written, disable the write
+ * event.
+ */
+static void
+job_write_callback(__unused struct bufferevent *bufev, void *data)
 {
 	struct job	*job = data;
 	size_t		 len = EVBUFFER_LENGTH(EVBUFFER_OUTPUT(job->event));
@@ -161,16 +186,17 @@ job_write_callback(unused struct bufferevent *bufev, void *data)
 }
 
 /* Job buffer error callback. */
-void
-job_callback(unused struct bufferevent *bufev, unused short events, void *data)
+static void
+job_error_callback(__unused struct bufferevent *bufev, __unused short events,
+    void *data)
 {
 	struct job	*job = data;
 
 	log_debug("job error %p: %s, pid %ld", job, job->cmd, (long) job->pid);
 
 	if (job->state == JOB_DEAD) {
-		if (job->callbackfn != NULL)
-			job->callbackfn(job);
+		if (job->completecb != NULL)
+			job->completecb(job);
 		job_free(job);
 	} else {
 		bufferevent_disable(job->event, EV_READ);
@@ -187,8 +213,8 @@ job_died(struct job *job, int status)
 	job->status = status;
 
 	if (job->state == JOB_CLOSED) {
-		if (job->callbackfn != NULL)
-			job->callbackfn(job);
+		if (job->completecb != NULL)
+			job->completecb(job);
 		job_free(job);
 	} else {
 		job->pid = -1;

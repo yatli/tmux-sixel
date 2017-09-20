@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2010 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2010 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -34,43 +34,20 @@ struct args_entry {
 	RB_ENTRY(args_entry)	 entry;
 };
 
-struct args_entry	*args_find(struct args *, u_char);
+static struct args_entry	*args_find(struct args *, u_char);
 
-RB_GENERATE(args_tree, args_entry, entry, args_cmp);
+static int	args_cmp(struct args_entry *, struct args_entry *);
+RB_GENERATE_STATIC(args_tree, args_entry, entry, args_cmp);
 
 /* Arguments tree comparison function. */
-int
+static int
 args_cmp(struct args_entry *a1, struct args_entry *a2)
 {
 	return (a1->flag - a2->flag);
 }
 
-/* Create an arguments set with no flags. */
-struct args *
-args_create(int argc, ...)
-{
-	struct args	*args;
-	va_list		 ap;
-	int		 i;
-
-	args = xcalloc(1, sizeof *args);
-
-	args->argc = argc;
-	if (argc == 0)
-		args->argv = NULL;
-	else
-		args->argv = xcalloc(argc, sizeof *args->argv);
-
-	va_start(ap, argc);
-	for (i = 0; i < argc; i++)
-		args->argv[i] = xstrdup(va_arg(ap, char *));
-	va_end(ap);
-
-	return (args);
-}
-
 /* Find a flag in the arguments tree. */
-struct args_entry *
+static struct args_entry *
 args_find(struct args *args, u_char ch)
 {
 	struct args_entry	entry;
@@ -127,84 +104,93 @@ args_free(struct args *args)
 	free(args);
 }
 
-/* Print a set of arguments. */
-size_t
-args_print(struct args *args, char *buf, size_t len)
+/* Add to string. */
+static void printflike(3, 4)
+args_print_add(char **buf, size_t *len, const char *fmt, ...)
 {
-	size_t		 	 off, used;
-	int			 i;
-	const char		*quotes;
-	struct args_entry	*entry;
+	va_list  ap;
+	char	*s;
+	size_t	 slen;
 
-	/* There must be at least one byte at the start. */
-	if (len == 0)
-		return (0);
-	off = 0;
+	va_start(ap, fmt);
+	slen = xvasprintf(&s, fmt, ap);
+	va_end(ap);
+
+	*len += slen;
+	*buf = xrealloc(*buf, *len);
+
+	strlcat(*buf, s, *len);
+	free(s);
+}
+
+/* Print a set of arguments. */
+char *
+args_print(struct args *args)
+{
+	size_t		 	 len;
+	char			*buf, *escaped;
+	int			 i, flags;
+	struct args_entry	*entry;
+	static const char	 quoted[] = " #\"';$";
+
+	len = 1;
+	buf = xcalloc(1, len);
 
 	/* Process the flags first. */
-	buf[off++] = '-';
 	RB_FOREACH(entry, args_tree, &args->tree) {
 		if (entry->value != NULL)
 			continue;
 
-		if (off == len - 1) {
-			buf[off] = '\0';
-			return (len);
-		}
-		buf[off++] = entry->flag;
-		buf[off] = '\0';
+		if (*buf == '\0')
+			args_print_add(&buf, &len, "-");
+		args_print_add(&buf, &len, "%c", entry->flag);
 	}
-	if (off == 1)
-		buf[--off] = '\0';
 
 	/* Then the flags with arguments. */
 	RB_FOREACH(entry, args_tree, &args->tree) {
 		if (entry->value == NULL)
 			continue;
 
-		if (off >= len) {
-			/* snprintf will have zero terminated. */
-			return (len);
-		}
-
-		if (strchr(entry->value, ' ') != NULL)
-			quotes = "\"";
+		if (*buf != '\0')
+			args_print_add(&buf, &len, " -%c ", entry->flag);
 		else
-			quotes = "";
-		used = xsnprintf(buf + off, len - off, "%s-%c %s%s%s",
-		    off != 0 ? " " : "", entry->flag, quotes, entry->value,
-		    quotes);
-		if (used > len - off)
-			used = len - off;
-		off += used;
+			args_print_add(&buf, &len, "-%c ", entry->flag);
+
+		flags = VIS_OCTAL|VIS_TAB|VIS_NL;
+		if (entry->value[strcspn(entry->value, quoted)] != '\0')
+			flags |= VIS_DQ;
+		utf8_stravis(&escaped, entry->value, flags);
+		if (flags & VIS_DQ)
+			args_print_add(&buf, &len, "\"%s\"", escaped);
+		else
+			args_print_add(&buf, &len, "%s", escaped);
+		free(escaped);
 	}
 
 	/* And finally the argument vector. */
 	for (i = 0; i < args->argc; i++) {
-		if (off >= len) {
-			/* snprintf will have zero terminated. */
-			return (len);
-		}
+		if (*buf != '\0')
+			args_print_add(&buf, &len, " ");
 
-		if (strchr(args->argv[i], ' ') != NULL)
-			quotes = "\"";
+		flags = VIS_OCTAL|VIS_TAB|VIS_NL;
+		if (args->argv[i][strcspn(args->argv[i], quoted)] != '\0')
+			flags |= VIS_DQ;
+		utf8_stravis(&escaped, args->argv[i], flags);
+		if (flags & VIS_DQ)
+			args_print_add(&buf, &len, "\"%s\"", escaped);
 		else
-			quotes = "";
-		used = xsnprintf(buf + off, len - off, "%s%s%s%s",
-		    off != 0 ? " " : "", quotes, args->argv[i], quotes);
-		if (used > len - off)
-			used = len - off;
-		off += used;
+			args_print_add(&buf, &len, "%s", escaped);
+		free(escaped);
 	}
 
-	return (off);
+	return (buf);
 }
 
 /* Return if an argument is present. */
 int
 args_has(struct args *args, u_char ch)
 {
-	return (args_find(args, ch) == NULL ? 0 : 1);
+	return (args_find(args, ch) != NULL);
 }
 
 /* Set argument value in the arguments tree. */

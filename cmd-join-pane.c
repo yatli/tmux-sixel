@@ -2,7 +2,7 @@
 
 /*
  * Copyright (c) 2011 George Nachman <tmux@georgester.com>
- * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2009 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -28,36 +28,41 @@
  * Join or move a pane into another (like split/swap/kill).
  */
 
-enum cmd_retval	 cmd_join_pane_exec(struct cmd *, struct cmd_q *);
-
-enum cmd_retval	 join_pane(struct cmd *, struct cmd_q *, int);
+static enum cmd_retval	cmd_join_pane_exec(struct cmd *, struct cmdq_item *);
 
 const struct cmd_entry cmd_join_pane_entry = {
-	"join-pane", "joinp",
-	"bdhvp:l:s:t:", 0, 0,
-	"[-bdhv] [-p percentage|-l size] " CMD_SRCDST_PANE_USAGE,
-	0,
-	cmd_join_pane_exec
+	.name = "join-pane",
+	.alias = "joinp",
+
+	.args = { "bdhvp:l:s:t:", 0, 0 },
+	.usage = "[-bdhv] [-p percentage|-l size] " CMD_SRCDST_PANE_USAGE,
+
+	.source = { 's', CMD_FIND_PANE, CMD_FIND_DEFAULT_MARKED },
+	.target = { 't', CMD_FIND_PANE, 0 },
+
+	.flags = 0,
+	.exec = cmd_join_pane_exec
 };
 
 const struct cmd_entry cmd_move_pane_entry = {
-	"move-pane", "movep",
-	"bdhvp:l:s:t:", 0, 0,
-	"[-bdhv] [-p percentage|-l size] " CMD_SRCDST_PANE_USAGE,
-	0,
-	cmd_join_pane_exec
+	.name = "move-pane",
+	.alias = "movep",
+
+	.args = { "bdhvp:l:s:t:", 0, 0 },
+	.usage = "[-bdhv] [-p percentage|-l size] " CMD_SRCDST_PANE_USAGE,
+
+	.source = { 's', CMD_FIND_PANE, 0 },
+	.target = { 't', CMD_FIND_PANE, 0 },
+
+	.flags = 0,
+	.exec = cmd_join_pane_exec
 };
 
-enum cmd_retval
-cmd_join_pane_exec(struct cmd *self, struct cmd_q *cmdq)
-{
-	return (join_pane(self, cmdq, self->entry == &cmd_join_pane_entry));
-}
-
-enum cmd_retval
-join_pane(struct cmd *self, struct cmd_q *cmdq, int not_same_window)
+static enum cmd_retval
+cmd_join_pane_exec(struct cmd *self, struct cmdq_item *item)
 {
 	struct args		*args = self->args;
+	struct cmd_find_state	*current = &item->shared->current;
 	struct session		*dst_s;
 	struct winlink		*src_wl, *dst_wl;
 	struct window		*src_w, *dst_w;
@@ -66,26 +71,31 @@ join_pane(struct cmd *self, struct cmd_q *cmdq, int not_same_window)
 	int			 size, percentage, dst_idx;
 	enum layout_type	 type;
 	struct layout_cell	*lc;
+	int			 not_same_window;
 
-	dst_wl = cmd_find_pane(cmdq, args_get(args, 't'), &dst_s, &dst_wp);
-	if (dst_wl == NULL)
-		return (CMD_RETURN_ERROR);
+	if (self->entry == &cmd_join_pane_entry)
+		not_same_window = 1;
+	else
+		not_same_window = 0;
+
+	dst_s = item->target.s;
+	dst_wl = item->target.wl;
+	dst_wp = item->target.wp;
 	dst_w = dst_wl->window;
 	dst_idx = dst_wl->idx;
 	server_unzoom_window(dst_w);
 
-	src_wl = cmd_find_pane_marked(cmdq, args_get(args, 's'), NULL, &src_wp);
-	if (src_wl == NULL)
-		return (CMD_RETURN_ERROR);
+	src_wl = item->source.wl;
+	src_wp = item->source.wp;
 	src_w = src_wl->window;
 	server_unzoom_window(src_w);
 
 	if (not_same_window && src_w == dst_w) {
-		cmdq_error(cmdq, "can't join a pane to its own window");
+		cmdq_error(item, "can't join a pane to its own window");
 		return (CMD_RETURN_ERROR);
 	}
 	if (!not_same_window && src_wp == dst_wp) {
-		cmdq_error(cmdq, "source and target panes must be different");
+		cmdq_error(item, "source and target panes must be different");
 		return (CMD_RETURN_ERROR);
 	}
 
@@ -97,14 +107,14 @@ join_pane(struct cmd *self, struct cmd_q *cmdq, int not_same_window)
 	if (args_has(args, 'l')) {
 		size = args_strtonum(args, 'l', 0, INT_MAX, &cause);
 		if (cause != NULL) {
-			cmdq_error(cmdq, "size %s", cause);
+			cmdq_error(item, "size %s", cause);
 			free(cause);
 			return (CMD_RETURN_ERROR);
 		}
 	} else if (args_has(args, 'p')) {
 		percentage = args_strtonum(args, 'p', 0, 100, &cause);
 		if (cause != NULL) {
-			cmdq_error(cmdq, "percentage %s", cause);
+			cmdq_error(item, "percentage %s", cause);
 			free(cause);
 			return (CMD_RETURN_ERROR);
 		}
@@ -113,9 +123,9 @@ join_pane(struct cmd *self, struct cmd_q *cmdq, int not_same_window)
 		else
 			size = (dst_wp->sx * percentage) / 100;
 	}
-	lc = layout_split_pane(dst_wp, type, size, args_has(args, 'b'));
+	lc = layout_split_pane(dst_wp, type, size, args_has(args, 'b'), 0);
 	if (lc == NULL) {
-		cmdq_error(cmdq, "create pane failed: pane too small");
+		cmdq_error(item, "create pane failed: pane too small");
 		return (CMD_RETURN_ERROR);
 	}
 
@@ -123,11 +133,6 @@ join_pane(struct cmd *self, struct cmd_q *cmdq, int not_same_window)
 
 	window_lost_pane(src_w, src_wp);
 	TAILQ_REMOVE(&src_w->panes, src_wp, entry);
-
-	if (window_count_panes(src_w) == 0)
-		server_kill_window(src_w);
-	else
-		notify_window_layout_changed(src_w);
 
 	src_wp->window = dst_w;
 	TAILQ_INSERT_AFTER(&dst_w->panes, dst_wp, src_wp, entry);
@@ -141,10 +146,16 @@ join_pane(struct cmd *self, struct cmd_q *cmdq, int not_same_window)
 	if (!args_has(args, 'd')) {
 		window_set_active_pane(dst_w, src_wp);
 		session_select(dst_s, dst_idx);
+		cmd_find_from_session(current, dst_s, 0);
 		server_redraw_session(dst_s);
 	} else
 		server_status_session(dst_s);
 
-	notify_window_layout_changed(dst_w);
+	if (window_count_panes(src_w) == 0)
+		server_kill_window(src_w);
+	else
+		notify_window("window-layout-changed", src_w);
+	notify_window("window-layout-changed", dst_w);
+
 	return (CMD_RETURN_NORMAL);
 }

@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2009 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -80,30 +80,32 @@ osdep_get_name(int fd, __unused char *tty)
 		return (NULL);
 
 	buf = NULL;
-	len = sizeof(bestp);
+	len = sizeof bestp;
+
 	mib[0] = CTL_KERN;
 	mib[1] = KERN_PROC2;
 	mib[2] = KERN_PROC_PGRP;
-	mib[4] = sizeof (*buf);
-	mib[5] = 0;
+	mib[4] = sizeof *buf;
 
 retry:
+	mib[5] = 0;
+
 	if (sysctl(mib, __arraycount(mib), NULL, &len, NULL, 0) == -1)
 		return (NULL);
 
-	if ((newbuf = realloc(buf, len * sizeof (*buf))) == NULL)
+	if ((newbuf = realloc(buf, len)) == NULL)
 		goto error;
 	buf = newbuf;
 
-	mib[5] = len / sizeof(*buf);
+	mib[5] = len / (sizeof *buf);
 	if (sysctl(mib, __arraycount(mib), buf, &len, NULL, 0) == -1) {
 		if (errno == ENOMEM)
-			goto retry; /* possible infinite loop? */
+			goto retry;
 		goto error;
 	}
 
 	bestp = NULL;
-	for (i = 0; i < len / sizeof (*buf); i++) {
+	for (i = 0; i < len / (sizeof *buf); i++) {
 		if (buf[i].p_tdev != sb.st_rdev)
 			continue;
 		if (bestp == NULL)

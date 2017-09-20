@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2009 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -40,15 +40,17 @@
  * We accept any but always output the latter (it comes first in the table).
  */
 
-int	xterm_keys_match(const char *, const char *, size_t, size_t *, u_int *);
-int	xterm_keys_modifiers(const char *, size_t, size_t *, u_int *);
+static int	xterm_keys_match(const char *, const char *, size_t, size_t *,
+		    key_code *);
+static int	xterm_keys_modifiers(const char *, size_t, size_t *,
+		    key_code *);
 
 struct xterm_keys_entry {
-	int		 key;
+	key_code	 key;
 	const char	*template;
 };
 
-const struct xterm_keys_entry xterm_keys_table[] = {
+static const struct xterm_keys_entry xterm_keys_table[] = {
 	{ KEYC_F1,	"\033[1;_P" },
 	{ KEYC_F1,	"\033O1;_P" },
 	{ KEYC_F1,	"\033O_P" },
@@ -113,9 +115,9 @@ const struct xterm_keys_entry xterm_keys_table[] = {
  * Match key against buffer, treating _ as a wildcard. Return -1 for no match,
  * 0 for match, 1 if the end of the buffer is reached (need more data).
  */
-int
+static int
 xterm_keys_match(const char *template, const char *buf, size_t len,
-    size_t *size, u_int *modifiers)
+    size_t *size, key_code *modifiers)
 {
 	size_t	pos;
 	int	retval;
@@ -147,8 +149,9 @@ xterm_keys_match(const char *template, const char *buf, size_t len,
 }
 
 /* Find modifiers from buffer. */
-int
-xterm_keys_modifiers(const char *buf, size_t len, size_t *pos, u_int *modifiers)
+static int
+xterm_keys_modifiers(const char *buf, size_t len, size_t *pos,
+    key_code *modifiers)
 {
 	u_int	flags;
 
@@ -179,11 +182,12 @@ xterm_keys_modifiers(const char *buf, size_t len, size_t *pos, u_int *modifiers)
  * key), -1 for not found, 1 for partial match.
  */
 int
-xterm_keys_find(const char *buf, size_t len, size_t *size, int *key)
+xterm_keys_find(const char *buf, size_t len, size_t *size, key_code *key)
 {
 	const struct xterm_keys_entry	*entry;
-	u_int				 i, modifiers;
+	u_int				 i;
 	int				 matched;
+	key_code			 modifiers;
 
 	for (i = 0; i < nitems(xterm_keys_table); i++) {
 		entry = &xterm_keys_table[i];
@@ -193,7 +197,7 @@ xterm_keys_find(const char *buf, size_t len, size_t *size, int *key)
 		if (matched == -1)
 			continue;
 		if (matched == 0)
-			*key = entry->key | modifiers;
+			*key = (entry->key|modifiers|KEYC_XTERM);
 		return (matched);
 	}
 	return (-1);
@@ -201,11 +205,11 @@ xterm_keys_find(const char *buf, size_t len, size_t *size, int *key)
 
 /* Lookup a key number from the table. */
 char *
-xterm_keys_lookup(int key)
+xterm_keys_lookup(key_code key)
 {
 	const struct xterm_keys_entry	*entry;
 	u_int				 i;
-	int				 modifiers;
+	key_code			 modifiers;
 	char				*out;
 
 	modifiers = 1;
@@ -223,8 +227,16 @@ xterm_keys_lookup(int key)
 	if (modifiers == 1)
 		return (NULL);
 
+	/*
+	 * If this has the escape modifier, but was not originally an xterm
+	 * key, it may be a genuine escape + key. So don't pass it through as
+	 * an xterm key or programs like vi may be confused.
+	 */
+	if ((key & (KEYC_ESCAPE|KEYC_XTERM)) == KEYC_ESCAPE)
+		return (NULL);
+
 	/* Otherwise, find the key in the table. */
-	key &= ~(KEYC_SHIFT|KEYC_ESCAPE|KEYC_CTRL);
+	key &= KEYC_MASK_KEY;
 	for (i = 0; i < nitems(xterm_keys_table); i++) {
 		entry = &xterm_keys_table[i];
 		if (key == entry->key)

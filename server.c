@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -40,48 +40,40 @@
  * Main server functions.
  */
 
-struct clients	 clients;
+struct clients		 clients;
 
-int		 server_fd;
-int		 server_shutdown;
-struct event	 server_ev_accept;
+struct tmuxproc		*server_proc;
+static int		 server_fd;
+static int		 server_exit;
+static struct event	 server_ev_accept;
 
-struct session		*marked_session;
-struct winlink		*marked_winlink;
-struct window		*marked_window;
-struct window_pane	*marked_window_pane;
-struct layout_cell	*marked_layout_cell;
+struct cmd_find_state	 marked_pane;
 
-int	server_create_socket(void);
-void	server_loop(void);
-int	server_should_shutdown(void);
-void	server_send_shutdown(void);
-void	server_accept_callback(int, short, void *);
-void	server_signal_callback(int, short, void *);
-void	server_child_signal(void);
-void	server_child_exited(pid_t, int);
-void	server_child_stopped(pid_t, int);
+static int	server_create_socket(void);
+static int	server_loop(void);
+static void	server_send_exit(void);
+static void	server_accept(int, short, void *);
+static void	server_signal(int);
+static void	server_child_signal(void);
+static void	server_child_exited(pid_t, int);
+static void	server_child_stopped(pid_t, int);
 
 /* Set marked pane. */
 void
 server_set_marked(struct session *s, struct winlink *wl, struct window_pane *wp)
 {
-	marked_session = s;
-	marked_winlink = wl;
-	marked_window = wl->window;
-	marked_window_pane = wp;
-	marked_layout_cell = wp->layout_cell;
+	cmd_find_clear_state(&marked_pane, 0);
+	marked_pane.s = s;
+	marked_pane.wl = wl;
+	marked_pane.w = wl->window;
+	marked_pane.wp = wp;
 }
 
 /* Clear marked pane. */
 void
 server_clear_marked(void)
 {
-	marked_session = NULL;
-	marked_winlink = NULL;
-	marked_window = NULL;
-	marked_window_pane = NULL;
-	marked_layout_cell = NULL;
+	cmd_find_clear_state(&marked_pane, 0);
 }
 
 /* Is this the marked pane? */
@@ -90,9 +82,9 @@ server_is_marked(struct session *s, struct winlink *wl, struct window_pane *wp)
 {
 	if (s == NULL || wl == NULL || wp == NULL)
 		return (0);
-	if (marked_session != s || marked_winlink != wl)
+	if (marked_pane.s != s || marked_pane.wl != wl)
 		return (0);
-	if (marked_window_pane != wp)
+	if (marked_pane.wp != wp)
 		return (0);
 	return (server_check_marked());
 }
@@ -101,29 +93,11 @@ server_is_marked(struct session *s, struct winlink *wl, struct window_pane *wp)
 int
 server_check_marked(void)
 {
-	struct winlink	*wl;
-
-	if (marked_window_pane == NULL)
-		return (0);
-	if (marked_layout_cell != marked_window_pane->layout_cell)
-		return (0);
-
-	if (!session_alive(marked_session))
-		return (0);
-	RB_FOREACH(wl, winlinks, &marked_session->windows) {
-		if (wl->window == marked_window && wl == marked_winlink)
-			break;
-	}
-	if (wl == NULL)
-		return (0);
-
-	if (!window_has_pane(marked_window, marked_window_pane))
-		return (0);
-	return (window_pane_visible(marked_window_pane));
+	return (cmd_find_valid_state(&marked_pane));
 }
 
 /* Create server socket. */
-int
+static int
 server_create_socket(void)
 {
 	struct sockaddr_un	sa;
@@ -144,12 +118,16 @@ server_create_socket(void)
 		return (-1);
 
 	mask = umask(S_IXUSR|S_IXGRP|S_IRWXO);
-	if (bind(fd, (struct sockaddr *) &sa, sizeof(sa)) == -1)
+	if (bind(fd, (struct sockaddr *) &sa, sizeof(sa)) == -1) {
+		close(fd);
 		return (-1);
+	}
 	umask(mask);
 
-	if (listen(fd, 16) == -1)
+	if (listen(fd, 128) == -1) {
+		close(fd);
 		return (-1);
+	}
 	setblocking(fd, 0);
 
 	return (fd);
@@ -157,55 +135,52 @@ server_create_socket(void)
 
 /* Fork new server. */
 int
-server_start(struct event_base *base, int lockfd, char *lockfile)
+server_start(struct tmuxproc *client, struct event_base *base, int lockfd,
+    char *lockfile)
 {
-	int	pair[2];
+	int		 pair[2];
+	struct job	*job;
+	sigset_t	 set, oldset;
 
-	/* The first client is special and gets a socketpair; create it. */
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pair) != 0)
 		fatal("socketpair failed");
-	log_debug("starting server");
 
+	sigfillset(&set);
+	sigprocmask(SIG_BLOCK, &set, &oldset);
 	switch (fork()) {
 	case -1:
 		fatal("fork failed");
 	case 0:
 		break;
 	default:
+		sigprocmask(SIG_SETMASK, &oldset, NULL);
 		close(pair[1]);
 		return (pair[0]);
 	}
 	close(pair[0]);
-
-	/*
-	 * Must daemonise before loading configuration as the PID changes so
-	 * $TMUX would be wrong for sessions created in the config file.
-	 */
 	if (daemon(1, 0) != 0)
 		fatal("daemon failed");
-
-	/* event_init() was called in our parent, need to reinit. */
-	clear_signals(0);
+	proc_clear_signals(client, 0);
 	if (event_reinit(base) != 0)
-		fatal("event_reinit failed");
+		fatalx("event_reinit failed");
+	server_proc = proc_start("server");
+	proc_set_signals(server_proc, server_signal);
+	sigprocmask(SIG_SETMASK, &oldset, NULL);
 
-	logfile("server");
-	log_debug("server started, pid %ld", (long) getpid());
+	if (log_get_level() > 1)
+		tty_create_log();
+	if (pledge("stdio rpath wpath cpath fattr unix getpw recvfd proc exec "
+	    "tty ps", NULL) != 0)
+		fatal("pledge failed");
 
 	RB_INIT(&windows);
 	RB_INIT(&all_window_panes);
 	TAILQ_INIT(&clients);
 	RB_INIT(&sessions);
-	TAILQ_INIT(&session_groups);
-	mode_key_init_trees();
+	RB_INIT(&session_groups);
 	key_bindings_init();
-	utf8_build();
 
-	start_time = time(NULL);
-	log_debug("socket path %s", socket_path);
-#ifdef HAVE_SETPROCTITLE
-	setproctitle("server (%s)", socket_path);
-#endif
+	gettimeofday(&start_time, NULL);
 
 	server_fd = server_create_socket();
 	if (server_fd == -1)
@@ -213,42 +188,45 @@ server_start(struct event_base *base, int lockfd, char *lockfile)
 	server_update_socket();
 	server_client_create(pair[1]);
 
-	unlink(lockfile);
-	free(lockfile);
-	close(lockfd);
+	if (lockfd >= 0) {
+		unlink(lockfile);
+		free(lockfile);
+		close(lockfd);
+	}
 
 	start_cfg();
 
-	status_prompt_load_history();
-
 	server_add_accept(0);
 
-	set_signals(server_signal_callback);
-	server_loop();
+	proc_loop(server_proc, server_loop);
+
+	LIST_FOREACH(job, &all_jobs, entry) {
+		if (job->pid != -1)
+			kill(job->pid, SIGTERM);
+	}
+
 	status_prompt_save_history();
 	exit(0);
 }
 
-/* Main server loop. */
-void
+/* Server loop callback. */
+static int
 server_loop(void)
 {
-	while (!server_should_shutdown()) {
-		log_debug("event dispatch enter");
-		event_loop(EVLOOP_ONCE);
-		log_debug("event dispatch exit");
-
-		server_client_loop();
-	}
-}
-
-/* Check if the server should exit (no more clients or sessions). */
-int
-server_should_shutdown(void)
-{
 	struct client	*c;
+	u_int		 items;
 
-	if (!options_get_number(&global_options, "exit-unattached")) {
+	do {
+		items = cmdq_next(NULL);
+		TAILQ_FOREACH(c, &clients, entry) {
+			if (c->flags & CLIENT_IDENTIFIED)
+				items += cmdq_next(c);
+		}
+	} while (items != 0);
+
+	server_client_loop();
+
+	if (!options_get_number(global_options, "exit-unattached")) {
 		if (!RB_EMPTY(&sessions))
 			return (0);
 	}
@@ -269,9 +247,9 @@ server_should_shutdown(void)
 	return (1);
 }
 
-/* Shutdown the server by killing all clients and windows. */
-void
-server_send_shutdown(void)
+/* Exit the server by killing all clients and windows. */
+static void
+server_send_exit(void)
 {
 	struct client	*c, *c1;
 	struct session	*s, *s1;
@@ -279,15 +257,15 @@ server_send_shutdown(void)
 	cmd_wait_for_flush();
 
 	TAILQ_FOREACH_SAFE(c, &clients, entry, c1) {
-		if (c->flags & (CLIENT_BAD|CLIENT_SUSPENDED))
+		if (c->flags & CLIENT_SUSPENDED)
 			server_client_lost(c);
 		else
-			server_write_client(c, MSG_SHUTDOWN, NULL, 0);
+			proc_send(c->peer, MSG_SHUTDOWN, -1, NULL, 0);
 		c->session = NULL;
 	}
 
 	RB_FOREACH_SAFE(s, sessions, &sessions, s1)
-		session_destroy(s);
+		session_destroy(s, __func__);
 }
 
 /* Update socket execute permissions based on whether sessions are attached. */
@@ -312,7 +290,7 @@ server_update_socket(void)
 
 		if (stat(socket_path, &sb) != 0)
 			return;
-		mode = sb.st_mode;
+		mode = sb.st_mode & ACCESSPERMS;
 		if (n != 0) {
 			if (mode & S_IRUSR)
 				mode |= S_IXUSR;
@@ -327,8 +305,8 @@ server_update_socket(void)
 }
 
 /* Callback for server socket. */
-void
-server_accept_callback(int fd, short events, unused void *data)
+static void
+server_accept(int fd, short events, __unused void *data)
 {
 	struct sockaddr_storage	sa;
 	socklen_t		slen = sizeof sa;
@@ -349,7 +327,7 @@ server_accept_callback(int fd, short events, unused void *data)
 		}
 		fatal("accept failed");
 	}
-	if (server_shutdown) {
+	if (server_exit) {
 		close(newfd);
 		return;
 	}
@@ -369,26 +347,27 @@ server_add_accept(int timeout)
 		event_del(&server_ev_accept);
 
 	if (timeout == 0) {
-		event_set(&server_ev_accept,
-		    server_fd, EV_READ, server_accept_callback, NULL);
+		event_set(&server_ev_accept, server_fd, EV_READ, server_accept,
+		    NULL);
 		event_add(&server_ev_accept, NULL);
 	} else {
-		event_set(&server_ev_accept,
-		    server_fd, EV_TIMEOUT, server_accept_callback, NULL);
+		event_set(&server_ev_accept, server_fd, EV_TIMEOUT,
+		    server_accept, NULL);
 		event_add(&server_ev_accept, &tv);
 	}
 }
 
 /* Signal handler. */
-void
-server_signal_callback(int sig, unused short events, unused void *data)
+static void
+server_signal(int sig)
 {
 	int	fd;
 
+	log_debug("%s: %s", __func__, strsignal(sig));
 	switch (sig) {
 	case SIGTERM:
-		server_shutdown = 1;
-		server_send_shutdown();
+		server_exit = 1;
+		server_send_exit();
 		break;
 	case SIGCHLD:
 		server_child_signal();
@@ -403,11 +382,14 @@ server_signal_callback(int sig, unused short events, unused void *data)
 		}
 		server_add_accept(0);
 		break;
+	case SIGUSR2:
+		proc_toggle_log(server_proc);
+		break;
 	}
 }
 
 /* Handle SIGCHLD. */
-void
+static void
 server_child_signal(void)
 {
 	int	 status;
@@ -430,7 +412,7 @@ server_child_signal(void)
 }
 
 /* Handle exited children. */
-void
+static void
 server_child_exited(pid_t pid, int status)
 {
 	struct window		*w, *w1;
@@ -441,13 +423,18 @@ server_child_exited(pid_t pid, int status)
 		TAILQ_FOREACH(wp, &w->panes, entry) {
 			if (wp->pid == pid) {
 				wp->status = status;
-				server_destroy_pane(wp);
+
+				log_debug("%%%u exited", wp->id);
+				wp->flags |= PANE_EXITED;
+
+				if (window_pane_destroy_ready(wp))
+					server_destroy_pane(wp, 1);
 				break;
 			}
 		}
 	}
 
-	LIST_FOREACH(job, &all_jobs, lentry) {
+	LIST_FOREACH(job, &all_jobs, entry) {
 		if (pid == job->pid) {
 			job_died(job, status);	/* might free job */
 			break;
@@ -456,7 +443,7 @@ server_child_exited(pid_t pid, int status)
 }
 
 /* Handle stopped children. */
-void
+static void
 server_child_stopped(pid_t pid, int status)
 {
 	struct window		*w;

@@ -1,7 +1,5 @@
-/* $OpenBSD$ */
-
 /*
- * Copyright (c) 2012 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2017 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -18,38 +16,40 @@
 
 #include <sys/types.h>
 
-#include <string.h>
+#include <glob.h>
+#include <unistd.h>
 
-#include "tmux.h"
+#include "compat.h"
 
-/* Get cell width. */
-u_int
-grid_cell_width(const struct grid_cell *gc)
+void fatal(const char *, ...);
+void fatalx(const char *, ...);
+
+#ifdef HAVE_PROC_PID
+int
+getdtablecount(void)
 {
-	return (gc->xstate >> 4);
-}
+	char	path[PATH_MAX];
+	glob_t	g;
+	int	n;
 
-/* Get cell data. */
-void
-grid_cell_get(const struct grid_cell *gc, struct utf8_data *ud)
-{
-	ud->size = gc->xstate & 0xf;
-	ud->width = gc->xstate >> 4;
-	memcpy(ud->data, gc->xdata, ud->size);
+	if (snprintf(path, sizeof path, "/proc/%ld/fd/*", (long)getpid()) < 0)
+		fatal("snprintf overflow");
+	switch (glob(path, 0, NULL, &g)) {
+	case GLOB_NOMATCH:
+		return (0);
+	case 0:
+		break;
+	default:
+		fatal("glob(\"%s\") failed", path);
+	}
+	n = g.gl_pathc;
+	globfree(&g);
+	return (n);
 }
-
-/* Set cell data. */
-void
-grid_cell_set(struct grid_cell *gc, const struct utf8_data *ud)
+#else
+int
+getdtablecount(void)
 {
-	memcpy(gc->xdata, ud->data, ud->size);
-	gc->xstate = (ud->width << 4) | ud->size;
+	return (0);
 }
-
-/* Set a single character as cell data. */
-void
-grid_cell_one(struct grid_cell *gc, u_char ch)
-{
-	*gc->xdata = ch;
-	gc->xstate = (1 << 4) | 1;
-}
+#endif

@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -53,12 +53,15 @@ recalculate_sizes(void)
 	int			 flag, has_status, is_zoomed, forced;
 
 	RB_FOREACH(s, sessions, &sessions) {
-		has_status = options_get_number(&s->options, "status");
+		has_status = options_get_number(s->options, "status");
 
 		s->attached = 0;
 		ssx = ssy = UINT_MAX;
 		TAILQ_FOREACH(c, &clients, entry) {
 			if (c->flags & CLIENT_SUSPENDED)
+				continue;
+			if ((c->flags & (CLIENT_CONTROL|CLIENT_SIZECHANGED)) ==
+			    CLIENT_CONTROL)
 				continue;
 			if (c->session == s) {
 				if (c->tty.sx < ssx)
@@ -84,17 +87,19 @@ recalculate_sizes(void)
 		if (s->sx == ssx && s->sy == ssy)
 			continue;
 
-		log_debug("session size %u,%u (was %u,%u)", ssx, ssy, s->sx,
-		    s->sy);
+		log_debug("session $%u size %u,%u (was %u,%u)", s->id, ssx, ssy,
+		    s->sx, s->sy);
 
 		s->sx = ssx;
 		s->sy = ssy;
+
+		status_update_saved(s);
 	}
 
 	RB_FOREACH(w, windows, &windows) {
 		if (w->active == NULL)
 			continue;
-		flag = options_get_number(&w->options, "aggressive-resize");
+		flag = options_get_number(w->options, "aggressive-resize");
 
 		ssx = ssy = UINT_MAX;
 		RB_FOREACH(s, sessions, &sessions) {
@@ -115,12 +120,12 @@ recalculate_sizes(void)
 			continue;
 
 		forced = 0;
-		limit = options_get_number(&w->options, "force-width");
+		limit = options_get_number(w->options, "force-width");
 		if (limit >= PANE_MINIMUM && ssx > limit) {
 			ssx = limit;
 			forced |= WINDOW_FORCEWIDTH;
 		}
-		limit = options_get_number(&w->options, "force-height");
+		limit = options_get_number(w->options, "force-height");
 		if (limit >= PANE_MINIMUM && ssy > limit) {
 			ssy = limit;
 			forced |= WINDOW_FORCEHEIGHT;
@@ -128,8 +133,8 @@ recalculate_sizes(void)
 
 		if (w->sx == ssx && w->sy == ssy)
 			continue;
-		log_debug("window size %u,%u (was %u,%u)", ssx, ssy, w->sx,
-		    w->sy);
+		log_debug("window @%u size %u,%u (was %u,%u)", w->id, ssx, ssy,
+		    w->sx, w->sy);
 
 		w->flags &= ~(WINDOW_FORCEWIDTH|WINDOW_FORCEHEIGHT);
 		w->flags |= forced;
@@ -154,8 +159,10 @@ recalculate_sizes(void)
 			if (w->active == wp)
 			       break;
 		}
+		if (w->active == w->last)
+			w->last = NULL;
 
 		server_redraw_window(w);
-		notify_window_layout_changed(w);
+		notify_window("window-layout-changed", w);
 	}
 }

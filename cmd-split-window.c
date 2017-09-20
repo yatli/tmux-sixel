@@ -1,7 +1,7 @@
 /* $OpenBSD$ */
 
 /*
- * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2009 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -32,47 +32,47 @@
 
 #define SPLIT_WINDOW_TEMPLATE "#{session_name}:#{window_index}.#{pane_index}"
 
-enum cmd_retval	 cmd_split_window_exec(struct cmd *, struct cmd_q *);
+static enum cmd_retval	cmd_split_window_exec(struct cmd *,
+			    struct cmdq_item *);
 
 const struct cmd_entry cmd_split_window_entry = {
-	"split-window", "splitw",
-	"bc:dF:l:hp:Pt:v", 0, -1,
-	"[-bdhvP] [-c start-directory] [-F format] [-p percentage|-l size] "
-	CMD_TARGET_PANE_USAGE " [command]",
-	0,
-	cmd_split_window_exec
+	.name = "split-window",
+	.alias = "splitw",
+
+	.args = { "bc:dfF:l:hp:Pt:v", 0, -1 },
+	.usage = "[-bdfhvP] [-c start-directory] [-F format] "
+		 "[-p percentage|-l size] " CMD_TARGET_PANE_USAGE " [command]",
+
+	.target = { 't', CMD_FIND_PANE, 0 },
+
+	.flags = 0,
+	.exec = cmd_split_window_exec
 };
 
-enum cmd_retval
-cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
+static enum cmd_retval
+cmd_split_window_exec(struct cmd *self, struct cmdq_item *item)
 {
+	struct cmd_find_state	*current = &item->shared->current;
 	struct args		*args = self->args;
-	struct session		*s;
-	struct winlink		*wl;
-	struct window		*w;
-	struct window_pane	*wp, *new_wp = NULL;
-	struct environ		 env;
-	const char		*cmd, *path, *shell, *template;
-	char		       **argv, *cause, *new_cause, *cp;
+	struct client		*c = cmd_find_client(item, NULL, 1);
+	struct session		*s = item->target.s;
+	struct winlink		*wl = item->target.wl;
+	struct window		*w = wl->window;
+	struct window_pane	*wp = item->target.wp, *new_wp = NULL;
+	struct environ		*env;
+	const char		*cmd, *path, *shell, *template, *cwd;
+	char		       **argv, *cause, *new_cause, *cp, *to_free = NULL;
 	u_int			 hlimit;
-	int			 argc, size, percentage, cwd, fd = -1;
+	int			 argc, size, percentage;
 	enum layout_type	 type;
 	struct layout_cell	*lc;
-	struct format_tree	*ft;
 	struct environ_entry	*envent;
+	struct cmd_find_state    fs;
 
-	if ((wl = cmd_find_pane(cmdq, args_get(args, 't'), &s, &wp)) == NULL)
-		return (CMD_RETURN_ERROR);
-	w = wl->window;
 	server_unzoom_window(w);
 
-	environ_init(&env);
-	environ_copy(&global_environ, &env);
-	environ_copy(&s->environ, &env);
-	server_fill_environ(s, &env);
-
 	if (args->argc == 0) {
-		cmd = options_get_string(&s->options, "default-command");
+		cmd = options_get_string(s->options, "default-command");
 		if (cmd != NULL && *cmd != '\0') {
 			argc = 1;
 			argv = (char **)&cmd;
@@ -86,25 +86,11 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 	}
 
 	if (args_has(args, 'c')) {
-		ft = format_create();
-		format_defaults(ft, cmd_find_client(cmdq, NULL, 1), s, NULL,
-		    NULL);
-		cp = format_expand(ft, args_get(args, 'c'));
-		format_free(ft);
-
-		if (cp != NULL && *cp != '\0') {
-			fd = open(cp, O_RDONLY|O_DIRECTORY);
-			free(cp);
-			if (fd == -1) {
-				cmdq_error(cmdq, "bad working directory: %s",
-				    strerror(errno));
-				return (CMD_RETURN_ERROR);
-			}
-		} else if (cp != NULL)
-			free(cp);
-		cwd = fd;
-	} else if (cmdq->client != NULL && cmdq->client->session == NULL)
-		cwd = cmdq->client->cwd;
+		cwd = args_get(args, 'c');
+		to_free = format_single(item, cwd, c, s, NULL, NULL);
+		cwd = to_free;
+	} else if (item->client != NULL && item->client->session == NULL)
+		cwd = item->client->cwd;
 	else
 		cwd = s->cwd;
 
@@ -134,72 +120,71 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 		else
 			size = (wp->sx * percentage) / 100;
 	}
-	hlimit = options_get_number(&s->options, "history-limit");
+	hlimit = options_get_number(s->options, "history-limit");
 
-	shell = options_get_string(&s->options, "default-shell");
+	shell = options_get_string(s->options, "default-shell");
 	if (*shell == '\0' || areshell(shell))
 		shell = _PATH_BSHELL;
 
-	lc = layout_split_pane(wp, type, size, args_has(args, 'b'));
+	lc = layout_split_pane(wp, type, size, args_has(args, 'b'),
+	    args_has(args, 'f'));
 	if (lc == NULL) {
 		cause = xstrdup("pane too small");
 		goto error;
 	}
-	new_wp = window_add_pane(w, hlimit);
-	layout_assign_pane(lc, new_wp);
+	new_wp = window_add_pane(w, wp, args_has(args, 'b'), hlimit);
+	layout_make_leaf(lc, new_wp);
 
 	path = NULL;
-	if (cmdq->client != NULL && cmdq->client->session == NULL)
-		envent = environ_find(&cmdq->client->environ, "PATH");
+	if (item->client != NULL && item->client->session == NULL)
+		envent = environ_find(item->client->environ, "PATH");
 	else
-		envent = environ_find(&s->environ, "PATH");
+		envent = environ_find(s->environ, "PATH");
 	if (envent != NULL)
 		path = envent->value;
 
-	if (window_pane_spawn(new_wp, argc, argv, path, shell, cwd, &env,
-	    s->tio, &cause) != 0)
+	env = environ_for_session(s, 0);
+	if (window_pane_spawn(new_wp, argc, argv, path, shell, cwd, env,
+	    s->tio, &cause) != 0) {
+		environ_free(env);
 		goto error;
+	}
+	environ_free(env);
 
+	layout_fix_panes(w, w->sx, w->sy);
 	server_redraw_window(w);
 
 	if (!args_has(args, 'd')) {
 		window_set_active_pane(w, new_wp);
 		session_select(s, wl->idx);
+		cmd_find_from_session(current, s, 0);
 		server_redraw_session(s);
 	} else
 		server_status_session(s);
 
-	environ_free(&env);
-
 	if (args_has(args, 'P')) {
 		if ((template = args_get(args, 'F')) == NULL)
 			template = SPLIT_WINDOW_TEMPLATE;
-
-		ft = format_create();
-		format_defaults(ft, cmd_find_client(cmdq, NULL, 1), s, wl,
-		    new_wp);
-
-		cp = format_expand(ft, template);
-		cmdq_print(cmdq, "%s", cp);
+		cp = format_single(item, template, c, s, wl, new_wp);
+		cmdq_print(item, "%s", cp);
 		free(cp);
-
-		format_free(ft);
 	}
-	notify_window_layout_changed(w);
+	notify_window("window-layout-changed", w);
 
-	if (fd != -1)
-		close(fd);
+	cmd_find_from_winlink_pane(&fs, wl, new_wp, 0);
+	hooks_insert(s->hooks, item, &fs, "after-split-window");
+
+	free(to_free);
 	return (CMD_RETURN_NORMAL);
 
 error:
-	environ_free(&env);
 	if (new_wp != NULL) {
 		layout_close_pane(new_wp);
 		window_remove_pane(w, new_wp);
 	}
-	cmdq_error(cmdq, "create pane failed: %s", cause);
+	cmdq_error(item, "create pane failed: %s", cause);
 	free(cause);
-	if (fd != -1)
-		close(fd);
+
+	free(to_free);
 	return (CMD_RETURN_ERROR);
 }

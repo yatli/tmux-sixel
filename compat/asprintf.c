@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006 Nicholas Marriott <nicm@users.sourceforge.net>
+ * Copyright (c) 2006 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,16 +14,13 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/types.h>
+
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#else
-#include <inttypes.h>
-#endif
 #include <string.h>
 
-#include "tmux.h"
+#include "compat.h"
 
 int
 asprintf(char **ret, const char *fmt, ...)
