@@ -1918,14 +1918,17 @@ input_dcs_dispatch(struct input_ctx *ictx)
 		    ictx->input_buf + prefix_len, ictx->input_len - prefix_len);
 	}
 
-	for (p = ictx->input_buf; p != ictx->input_buf + ictx->input_len; p++) {
-		if ((*p >= 0 && *p <= 9) || *p == ';')
-			continue;
-		if (*p != 'q')
-			break;
-		screen_write_sixel(&ictx->ctx,
-		                   ictx->input_buf, ictx->input_len);
-	}
+    log_debug("%s: sixel: input len = %ld", __func__, ictx->input_len);
+
+    for (p = ictx->input_buf; p != ictx->input_buf + ictx->input_len; p++) {
+        if ((*p >= 0 && *p <= 9) || *p == ';')
+            continue;
+        if (*p != 'q')
+            break;
+        screen_write_sixel(&ictx->ctx,
+                           p, ictx->input_buf + ictx->input_len - p);
+        break;
+    }
 
 	return (0);
 }

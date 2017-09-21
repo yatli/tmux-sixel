@@ -1442,9 +1442,9 @@ tty_cmd_write_sixel(struct tty *tty, const struct tty_ctx *ctx)
 			tty_putcode2(tty, TTYC_SMGLR, ctx->xoff,
 			             ctx->xoff + screen_size_x(s) - 1);
 		tty_cursor_pane(tty, ctx, ctx->ocx, ctx->ocy);
-		bufferevent_write(ctx->wp->event, "\033P", 2);
-		bufferevent_write(ctx->wp->event, str, ctx->num);
-		bufferevent_write(ctx->wp->event, "\033\\", 2);
+		tty_add(tty, "\033P", 2);
+		tty_add(tty, str, ctx->num);
+		tty_add(tty, "\033\\", 2);
 		if (!tty_pane_full_width(tty, ctx))
 			tty_putcode(tty, TTYC_MGC);
 		tty_region_pane(tty, ctx, ctx->orupper, ctx->orlower);
@@ -1455,7 +1455,7 @@ tty_cmd_write_sixel(struct tty *tty, const struct tty_ctx *ctx)
 		s->cy += (pixel_y - 1) * tty->sy / tty->pixel_y + 1;
 		if (s->cy > screen_size_y(s) - 1)
 			s->cy = screen_size_y(s) - 1;
-        }
+    }
 }
 
 void
