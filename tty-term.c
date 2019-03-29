@@ -257,6 +257,7 @@ static const struct tty_term_code_entry tty_term_codes[] = {
 	[TTYC_SMGLR] = { TTYCODE_STRING, "smglr" },
 	[TTYC_SMKX] = { TTYCODE_STRING, "smkx" },
 	[TTYC_SMSO] = { TTYCODE_STRING, "smso" },
+	[TTYC_SMULX] = { TTYCODE_STRING, "Smulx" },
 	[TTYC_SMUL] = { TTYCODE_STRING, "smul" },
 	[TTYC_SMXX] =  { TTYCODE_STRING, "smxx" },
 	[TTYC_SS] = { TTYCODE_STRING, "Ss" },
@@ -303,25 +304,53 @@ tty_term_strip(const char *s)
 	return (xstrdup(buf));
 }
 
+static char *
+tty_term_override_next(const char *s, size_t *offset)
+{
+	static char	value[BUFSIZ];
+	size_t		n = 0, at = *offset;
+
+	if (s[at] == '\0')
+		return (NULL);
+
+	while (s[at] != '\0') {
+		if (s[at] == ':') {
+			if (s[at + 1] == ':') {
+				value[n++] = ':';
+				at += 2;
+			} else
+				break;
+		} else {
+			value[n++] = s[at];
+			at++;
+		}
+		if (n == (sizeof value) - 1)
+			return (NULL);
+	}
+	if (s[at] != '\0')
+		*offset = at + 1;
+	else
+		*offset = at;
+	value[n] = '\0';
+	return (value);
+}
+
 static void
 tty_term_override(struct tty_term *term, const char *override)
 {
 	const struct tty_term_code_entry	*ent;
 	struct tty_code				*code;
-	char					*next, *s, *copy, *cp, *value;
+	size_t                                   offset = 0;
+	char					*cp, *value, *s;
 	const char				*errstr;
 	u_int					 i;
 	int					 n, remove;
 
-	copy = next = xstrdup(override);
-
-	s = strsep(&next, ":");
-	if (s == NULL || next == NULL || fnmatch(s, term->name, 0) != 0) {
-		free(copy);
+	s = tty_term_override_next(override, &offset);
+	if (s == NULL || fnmatch(s, term->name, 0) != 0)
 		return;
-	}
 
-	while ((s = strsep(&next, ":")) != NULL) {
+	while ((s = tty_term_override_next(override, &offset)) != NULL) {
 		if (*s == '\0')
 			continue;
 		value = NULL;
@@ -342,6 +371,8 @@ tty_term_override(struct tty_term *term, const char *override)
 
 		if (remove)
 			log_debug("%s override: %s@", term->name, s);
+		else if (*value == '\0')
+			log_debug("%s override: %s", term->name, s);
 		else
 			log_debug("%s override: %s=%s", term->name, s, value);
 
@@ -380,7 +411,6 @@ tty_term_override(struct tty_term *term, const char *override)
 
 		free(value);
 	}
-	free(s);
 }
 
 struct tty_term *
