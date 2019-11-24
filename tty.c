@@ -195,6 +195,25 @@ tty_timer_callback(__unused int fd, __unused short events, void *data)
 	evtimer_add(&tty->timer, &tv);
 }
 
+// Officially:
+// Handle slow terminals and fast output better: when the amount of data
+// outstanding gets too large, discard output until it is drained and we are
+// able to do a full redraw. Prevents tmux sitting on a huge buffer that the
+// terminal will take forever to consume.
+// Do not redraw a client unless we realistically think it can accept the data
+// - defer redraws until the client has nothing else waiting to write.
+//
+// However:
+// This is a "feature" for slow terminals that messes up other cases,
+// including sixel support: tmux is basically taking initiative by dropping
+// output thus breaking the integrity of the output of whatever command was run
+// inside of tmux.
+//
+// For proper sixel support, it must be disabled.
+//  
+// https://github.com/tmux/tmux/issues/1019
+// https://github.com/tmux/tmux/issues/1502#issuecomment-429710887
+
 static int
 tty_block_maybe(struct tty *tty)
 {
@@ -202,11 +221,19 @@ tty_block_maybe(struct tty *tty)
 	size_t		 size = EVBUFFER_LENGTH(tty->out);
 	struct timeval	 tv = { .tv_usec = TTY_BLOCK_INTERVAL };
 
+// force 0 to support sixels
+ return (0);
+// eventually, could try to make it so that the blocking mechanism is disabled
+// until the content of the DCS passthrough escape has been flushed to the
+// terminal
+
+
 	if (size < TTY_BLOCK_START(tty))
 		return (0);
 
 	if (tty->flags & TTY_BLOCK)
 		return (1);
+
 	tty->flags |= TTY_BLOCK;
 
 	log_debug("%s: can't keep up, %zu discarded", c->name, size);
