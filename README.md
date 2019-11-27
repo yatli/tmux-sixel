@@ -106,7 +106,7 @@ vertical split does not plays well with ansi and sixel
 
 Here is what my terminal looks like while I am editing this file in VIM
 
-![mintty running tmux split window and displaying sixels inside](https://raw.githubusercontent.com/csdvrx/sixel-testsuite/master/sixel-tmux.jpg)
+![mintty running tmux split window and displaying sixels inside](https://raw.githubusercontent.com/csdvrx/sixel-tmux/master/sixel-tmux.jpg)
 
 ### Why a fork
 
