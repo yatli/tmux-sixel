@@ -100,11 +100,13 @@ Ansi blocks are separated until you move to another buffer and back (font-ansi-b
 
 dynamic switching of the 16 colors palette is not working (toggle-solarized-dark.sh/toggle-solarized-light.sh)
 
+vertical split does not plays well with ansi and sixel
+
 ### Example inside mintty
 
 Here is what my terminal looks like while I am editing this file in VIM
 
-![mintty displaying sixel](https://raw.githubusercontent.com/csdvrx/sixel-testsuite/master/sixel-result.jpg)
+![mintty running tmux split window and displaying sixels inside](https://raw.githubusercontent.com/csdvrx/sixel-testsuite/master/sixel-tmux.jpg)
 
 ### Why a fork
 
