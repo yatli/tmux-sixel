@@ -195,13 +195,15 @@ tty_timer_callback(__unused int fd, __unused short events, void *data)
 	evtimer_add(&tty->timer, &tv);
 }
 
+// Do not redraw a client unless we realistically think it can accept the data
+// This defers redraws until the client has nothing else waiting to write.
+// https://github.com/tmux/tmux/commit/fa6deb58664739a8073f188a4e3a88a122270537
+//
 // Officially:
 // Handle slow terminals and fast output better: when the amount of data
 // outstanding gets too large, discard output until it is drained and we are
 // able to do a full redraw. Prevents tmux sitting on a huge buffer that the
 // terminal will take forever to consume.
-// Do not redraw a client unless we realistically think it can accept the data
-// - defer redraws until the client has nothing else waiting to write.
 //
 // However:
 // This is a "feature" for slow terminals that messes up other cases,
@@ -211,7 +213,7 @@ tty_timer_callback(__unused int fd, __unused short events, void *data)
 //
 // For proper sixel support, it must be disabled.
 //  
-// https://github.com/tmux/tmux/issues/1019
+// https://github.com/tmux/tmux/issues/1019#issuecomment-318284445
 // https://github.com/tmux/tmux/issues/1502#issuecomment-429710887
 
 static int
