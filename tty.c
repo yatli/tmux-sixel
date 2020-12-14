@@ -195,6 +195,27 @@ tty_timer_callback(__unused int fd, __unused short events, void *data)
 	evtimer_add(&tty->timer, &tv);
 }
 
+// Do not redraw a client unless we realistically think it can accept the data
+// This defers redraws until the client has nothing else waiting to write.
+// https://github.com/tmux/tmux/commit/fa6deb58664739a8073f188a4e3a88a122270537
+//
+// Officially:
+// Handle slow terminals and fast output better: when the amount of data
+// outstanding gets too large, discard output until it is drained and we are
+// able to do a full redraw. Prevents tmux sitting on a huge buffer that the
+// terminal will take forever to consume.
+//
+// However:
+// This is a "feature" for slow terminals that messes up other cases,
+// including sixel support: tmux is basically taking initiative by dropping
+// output thus breaking the integrity of the output of whatever command was run
+// inside of tmux.
+//
+// For proper sixel support, it must be disabled.
+//  
+// https://github.com/tmux/tmux/issues/1019#issuecomment-318284445
+// https://github.com/tmux/tmux/issues/1502#issuecomment-429710887
+
 static int
 tty_block_maybe(struct tty *tty)
 {
@@ -202,11 +223,19 @@ tty_block_maybe(struct tty *tty)
 	size_t		 size = EVBUFFER_LENGTH(tty->out);
 	struct timeval	 tv = { .tv_usec = TTY_BLOCK_INTERVAL };
 
+// force 0 to support sixels
+ return (0);
+// eventually, could try to make it so that the blocking mechanism is disabled
+// until the content of the DCS passthrough escape has been flushed to the
+// terminal
+
+
 	if (size < TTY_BLOCK_START(tty))
 		return (0);
 
 	if (tty->flags & TTY_BLOCK)
 		return (1);
+
 	tty->flags |= TTY_BLOCK;
 
 	log_debug("%s: can't keep up, %zu discarded", c->name, size);
@@ -1846,8 +1875,19 @@ tty_attributes(struct tty *tty, const struct grid_cell *gc,
 		tty_putcode(tty, TTYC_DIM);
 	if (changed & GRID_ATTR_ITALICS)
 		tty_set_italics(tty);
-	if (changed & GRID_ATTR_UNDERSCORE)
-		tty_putcode(tty, TTYC_SMUL);
+	if (changed & GRID_ATTR_ALL_UNDERSCORE) {
+		if ((changed & GRID_ATTR_UNDERSCORE) ||
+		    !tty_term_has(tty->term, TTYC_SMULX))
+			tty_putcode(tty, TTYC_SMUL);
+		else if (changed & GRID_ATTR_UNDERSCORE_2)
+			tty_putcode1(tty, TTYC_SMULX, 2);
+		else if (changed & GRID_ATTR_UNDERSCORE_3)
+			tty_putcode1(tty, TTYC_SMULX, 3);
+		else if (changed & GRID_ATTR_UNDERSCORE_4)
+			tty_putcode1(tty, TTYC_SMULX, 4);
+		else if (changed & GRID_ATTR_UNDERSCORE_5)
+			tty_putcode1(tty, TTYC_SMULX, 5);
+	}
 	if (changed & GRID_ATTR_BLINK)
 		tty_putcode(tty, TTYC_BLINK);
 	if (changed & GRID_ATTR_REVERSE) {
